@@ -13,6 +13,7 @@ import { resolveModel } from "../llm/provider.js";
 import { EPHEMERAL_CACHE, supportsTemperature } from "../llm/provider-options.js";
 import { MemoryManager } from "../memory/manager.js";
 import { MemoryRecall } from "../memory/recall.js";
+import { MEMORY_RECALL_ACK } from "../memory/types.js";
 import {
   buildDirectoryTree,
   buildSystemPrompt as buildPrompt,
@@ -179,16 +180,22 @@ export class ContextManager {
 
   private createMemoryRecall(): MemoryRecall {
     const projectDb = this.memoryManager.getDbForScope("project");
+    const globalDb = this.memoryManager.getDbForScope("global");
+    const adapt = (db: typeof projectDb) => ({
+      searchUnicode: (q: string, l?: number) => db.searchUnicode(q, l),
+      searchTrigram: (q: string, l?: number) => db.searchTrigram(q, l),
+      searchTrigramWithBigram: (q: string, l?: number) => db.searchTrigramWithBigram(q, l),
+      findByFileIds: (ids: number[], l?: number) => db.findByFileIds(ids, l),
+      findByPaths: (paths: string[], l?: number) => db.findByPaths(paths, l),
+      topByUsage: (l?: number) => db.topByUsage(l),
+      readMany: (ids: string[]) => db.readMany(ids),
+      fileIdsByMemoryIds: (ids: string[]) => db.fileIdsByMemoryIds(ids),
+    });
     return new MemoryRecall(
-      {
-        searchUnicode: (q, l) => projectDb.searchUnicode(q, l),
-        searchTrigram: (q, l) => projectDb.searchTrigram(q, l),
-        searchTrigramWithBigram: (q, l) => projectDb.searchTrigramWithBigram(q, l),
-        findByFileIds: (ids, l) => projectDb.findByFileIds(ids, l),
-        findByPaths: (paths, l) => projectDb.findByPaths(paths, l),
-        topByUsage: (l) => projectDb.topByUsage(l),
-        readMany: (ids) => projectDb.readMany(ids),
-      },
+      [
+        { scope: "project", db: adapt(projectDb) },
+        { scope: "global", db: adapt(globalDb) },
+      ],
       this.repoMap,
     );
   }
@@ -196,11 +203,13 @@ export class ContextManager {
   async buildMemoryRecallMessages(
     lastUserMessage: string,
   ): Promise<[{ role: "user"; content: string }, { role: "assistant"; content: string }] | null> {
-    const editedPaths = [...this.editedFiles].map((abs) =>
-      abs.startsWith(`${this.cwd}/`) ? abs.slice(this.cwd.length + 1) : abs,
-    );
+    const editedPaths = [...this.editedFiles]
+      .map((abs) => (abs.startsWith(`${this.cwd}/`) ? abs.slice(this.cwd.length + 1) : abs))
+      .sort();
     const memGen = this.memoryManager.generation;
-    const cacheKey = `${memGen}|${this.recallEditEpoch}|${lastUserMessage}|${editedPaths.join(",")}`;
+    const readScope = this.memoryManager.scopeConfig.readScope;
+    if (readScope === "none") return null;
+    const cacheKey = `${memGen}|${this.recallEditEpoch}|${readScope}|${lastUserMessage}|${editedPaths.join(",")}`;
     if (this.recallCache && this.recallCache.key === cacheKey) {
       return this.recallCache.pair;
     }
@@ -210,6 +219,7 @@ export class ContextManager {
       results = await this.memoryRecall.recall({
         query: lastUserMessage,
         editedFiles: editedPaths,
+        readScope,
       });
     } catch {
       this.recallCache = { key: cacheKey, pair: null };
@@ -223,8 +233,7 @@ export class ContextManager {
 
     const lines: string[] = ["<recalled_memories>"];
     const surfacedIds: Array<{ scope: "global" | "project"; id: string }> = [];
-    for (const { record } of fresh) {
-      const scope = this.resolveMemoryScope(record.id);
+    for (const { record, scope } of fresh) {
       surfacedIds.push({ scope, id: record.id });
       this.surfacedMemoryIds.add(record.id);
       const cat = record.category ?? "—";
@@ -236,18 +245,13 @@ export class ContextManager {
     this.memoryManager.recordRecallAcross(surfacedIds);
 
     const userMessage = lines.join("\n");
-    const assistantAck = `Acknowledged — ${String(surfacedIds.length)} relevant memor${surfacedIds.length === 1 ? "y" : "ies"} surfaced.`;
+    const assistantAck = MEMORY_RECALL_ACK(surfacedIds.length);
     const pair: [{ role: "user"; content: string }, { role: "assistant"; content: string }] = [
       { role: "user" as const, content: userMessage },
       { role: "assistant" as const, content: assistantAck },
     ];
     this.recallCache = { key: cacheKey, pair };
     return pair;
-  }
-
-  /** Locate which scope DB owns a memory id (project first, then global). */
-  private resolveMemoryScope(id: string): "global" | "project" {
-    return this.memoryManager.read("project", id) ? "project" : "global";
   }
 
   /** Provider options for the memory recall message pair — cached ephemerally. */

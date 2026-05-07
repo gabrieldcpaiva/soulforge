@@ -24,17 +24,21 @@ interface CreateMemoryToolDeps {
 export function createMemoryTool(deps: MemoryManager | CreateMemoryToolDeps) {
   const manager = "manager" in deps ? deps.manager : deps;
   const intelligence = "manager" in deps ? (deps.intelligence ?? null) : null;
+  const adapt = (db: ReturnType<typeof manager.getDbForScope>) => ({
+    searchUnicode: (q: string, l?: number) => db.searchUnicode(q, l),
+    searchTrigram: (q: string, l?: number) => db.searchTrigram(q, l),
+    searchTrigramWithBigram: (q: string, l?: number) => db.searchTrigramWithBigram(q, l),
+    findByFileIds: (ids: number[], l?: number) => db.findByFileIds(ids, l),
+    findByPaths: (paths: string[], l?: number) => db.findByPaths(paths, l),
+    topByUsage: (l?: number) => db.topByUsage(l),
+    readMany: (ids: string[]) => db.readMany(ids),
+    fileIdsByMemoryIds: (ids: string[]) => db.fileIdsByMemoryIds(ids),
+  });
   const recall = new MemoryRecall(
-    {
-      searchUnicode: (q, l) => manager.getDbForScope("project").searchUnicode(q, l),
-      searchTrigram: (q, l) => manager.getDbForScope("project").searchTrigram(q, l),
-      searchTrigramWithBigram: (q, l) =>
-        manager.getDbForScope("project").searchTrigramWithBigram(q, l),
-      findByFileIds: (ids, l) => manager.getDbForScope("project").findByFileIds(ids, l),
-      findByPaths: (paths, l) => manager.getDbForScope("project").findByPaths(paths, l),
-      topByUsage: (l) => manager.getDbForScope("project").topByUsage(l),
-      readMany: (ids) => manager.getDbForScope("project").readMany(ids),
-    },
+    [
+      { scope: "project" as const, db: adapt(manager.getDbForScope("project")) },
+      { scope: "global" as const, db: adapt(manager.getDbForScope("global")) },
+    ],
     intelligence,
   );
 
@@ -190,6 +194,13 @@ export function createMemoryTool(deps: MemoryManager | CreateMemoryToolDeps) {
           return { success: false, output: "id required for get", error: "missing_id" };
         }
         const readScope = resolveReadScope(args.scope);
+        if (readScope === "disabled") {
+          return {
+            success: false,
+            output: "Memory reads are disabled (scope: none)",
+            error: "disabled",
+          };
+        }
         const found = manager.findById(readScope, args.id);
         if (!found) {
           return { success: false, output: `Memory not found: ${args.id}`, error: "not_found" };
@@ -199,6 +210,13 @@ export function createMemoryTool(deps: MemoryManager | CreateMemoryToolDeps) {
 
       function handleList() {
         const readScope = resolveReadScope(args.scope);
+        if (readScope === "disabled") {
+          return {
+            success: false,
+            output: "Memory reads are disabled (scope: none)",
+            error: "disabled",
+          };
+        }
         const results = manager.list(readScope, {
           category: (args.category as MemoryCategory | undefined) ?? undefined,
           topic: args.topic ?? undefined,
@@ -217,17 +235,26 @@ export function createMemoryTool(deps: MemoryManager | CreateMemoryToolDeps) {
         if (!args.query) {
           return { success: false, output: "query required for search", error: "missing_query" };
         }
+        const readScope = resolveReadScope(args.scope);
+        if (readScope === "disabled") {
+          return {
+            success: false,
+            output: "Memory reads are disabled (scope: none)",
+            error: "disabled",
+          };
+        }
         const hits = await recall.recall({
           query: args.query,
           limit: args.limit ?? 10,
+          readScope,
         });
         if (hits.length === 0) return { success: true, output: "No matching memories found." };
         return {
           success: true,
           output: hits
             .map(
-              ({ record, normalized_score }) =>
-                `${formatRecordLine({ ...record, scope: "project" })}  score=${normalized_score.toFixed(2)}`,
+              ({ record, scope, normalized_score }) =>
+                `${formatRecordLine({ ...record, scope })}  score=${normalized_score.toFixed(2)}`,
             )
             .join("\n"),
         };
@@ -295,9 +322,11 @@ export function createMemoryTool(deps: MemoryManager | CreateMemoryToolDeps) {
     return raw;
   }
 
-  function resolveReadScope(requested: string | null | undefined): MemoryScope | "both" | "all" {
+  function resolveReadScope(
+    requested: string | null | undefined,
+  ): MemoryScope | "both" | "all" | "disabled" {
     const raw = requested ?? manager.scopeConfig.readScope;
-    if (raw === "none") return "all"; // tool callers expect a non-empty result set
+    if (raw === "none") return "disabled";
     if (raw === "both" || raw === "all") return raw;
     if (raw === "project" || raw === "global") return raw;
     return "all";

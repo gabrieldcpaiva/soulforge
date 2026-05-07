@@ -9,6 +9,8 @@ export interface MemoryRecallOptions {
   threshold?: number;
   /** Estimated max characters of inject content (≈ chars/4 tokens). */
   maxChars?: number;
+  /** Restrict scoring to a subset of configured scopes. Default: all configured. */
+  readScope?: import("./types.js").MemoryScope | "both" | "all";
 }
 
 interface DbLike {
@@ -19,6 +21,12 @@ interface DbLike {
   findByPaths: MemoryDB["findByPaths"];
   topByUsage: MemoryDB["topByUsage"];
   readMany: MemoryDB["readMany"];
+  fileIdsByMemoryIds?: MemoryDB["fileIdsByMemoryIds"];
+}
+
+export interface DbScopeAdapter {
+  scope: import("./types.js").MemoryScope;
+  db: DbLike;
 }
 
 interface IntelLike {
@@ -38,12 +46,14 @@ export class MemoryRecall {
   private readonly defaultLimit: number;
   private readonly defaultThreshold: number;
   private readonly defaultMaxChars: number;
+  private readonly scopes: readonly DbScopeAdapter[];
 
   constructor(
-    private readonly db: DbLike,
+    db: DbLike | readonly DbScopeAdapter[],
     private readonly intel: IntelLike | null = null,
     opts: { defaultLimit?: number; defaultThreshold?: number; defaultMaxChars?: number } = {},
   ) {
+    this.scopes = isAdapterArray(db) ? db : [{ scope: "project", db }];
     this.defaultLimit = opts.defaultLimit ?? DEFAULT_LIMIT;
     this.defaultThreshold = opts.defaultThreshold ?? DEFAULT_THRESHOLD;
     this.defaultMaxChars = opts.defaultMaxChars ?? DEFAULT_MAX_CHARS;
@@ -56,84 +66,69 @@ export class MemoryRecall {
 
     const query = opts.query?.trim() ?? "";
     const editedFiles = opts.editedFiles ?? [];
+    const filtered = filterScopes(this.scopes, opts.readScope);
+    if (filtered.length === 0) return [];
 
-    // ── Signal 1+2: FTS over user query (if present) ──────────────────
-    const unicodeHits = query ? this.db.searchUnicode(query, FTS_CANDIDATE_LIMIT) : [];
-    let trigramHits = query ? this.db.searchTrigram(query, FTS_CANDIDATE_LIMIT) : [];
-    // Bigram fallback: when neither index hit, try the short-token expander
-    // so 2-char Latin queries (`js`, `ai`) and CJK fragments still match.
-    if (query && unicodeHits.length === 0 && trigramHits.length === 0) {
-      trigramHits = this.db.searchTrigramWithBigram(query, FTS_CANDIDATE_LIMIT);
-    }
+    // ── File affinity: resolve edited paths → ids ONCE, in parallel.
+    const editedFileIds = await this.resolveEditedFileIds(editedFiles);
 
-    // ── Signal 3: file affinity ──────────────────────────────────
-    const fileAffinityIds = await this.collectFileAffinityIds(editedFiles);
+    // Run per-scope candidate gathering in parallel.
+    const perScope = await Promise.all(
+      filtered.map((s) => this.gatherScope(s, query, editedFiles, editedFileIds)),
+    );
 
-    // ── Signal 4: usage fallback ────────────────────────────────
-    // Only used when no query and no edited-file signal is available, so
-    // pinned/high-use rows surface for an empty prompt without polluting
-    // a real query that should be ranked by relevance.
-    const hasDirectionalSignal =
-      unicodeHits.length > 0 || trigramHits.length > 0 || fileAffinityIds.length > 0;
-    const usageIds = hasDirectionalSignal ? [] : this.db.topByUsage(USAGE_CANDIDATE_LIMIT);
-
-    // ── Build candidate set ──────────────────────────────────────
-    const candidateIds = new Set<string>();
-    for (const h of unicodeHits) candidateIds.add(h.id);
-    for (const h of trigramHits) candidateIds.add(h.id);
-    for (const id of fileAffinityIds) candidateIds.add(id);
-    for (const id of usageIds) candidateIds.add(id);
-    if (candidateIds.size === 0) return [];
-
-    const records = this.db.readMany([...candidateIds]).filter((r) => !r.hidden);
-    if (records.length === 0) return [];
-
-    // ── Score each candidate ────────────────────────────────────
-    const unicodeRank = rankMap(unicodeHits.map((h) => h.id));
-    const trigramRank = rankMap(trigramHits.map((h) => h.id));
-    const fileAffinitySet = new Set(fileAffinityIds);
-
-    // Per-call cache: file_id → blast radius
+    // Flatten + score with shared blast cache.
     const blastCache = new Map<number, number>();
+    const intel = this.intel;
     const blastFor = async (fileIds: number[]): Promise<number> => {
-      if (!this.intel || fileIds.length === 0) return 0;
-      let max = 0;
-      for (const fid of fileIds) {
-        let radius = blastCache.get(fid);
-        if (radius === undefined) {
-          try {
-            radius = await this.intel.getFileBlastRadiusById(fid);
-          } catch {
-            radius = 0;
+      if (!intel || fileIds.length === 0) return 0;
+      const radii = await Promise.all(
+        fileIds.map(async (fid) => {
+          let radius = blastCache.get(fid);
+          if (radius === undefined) {
+            try {
+              radius = await intel.getFileBlastRadiusById(fid);
+            } catch {
+              radius = 0;
+            }
+            blastCache.set(fid, radius);
           }
-          blastCache.set(fid, radius);
-        }
-        if (radius > max) max = radius;
-      }
-      return max;
+          return radius;
+        }),
+      );
+      return radii.reduce((m, r) => (r > m ? r : m), 0);
     };
 
     const now = Date.now();
     const scored: MemoryRecallResult[] = [];
 
-    for (const record of records) {
-      const fileIds = await this.fileIdsForRecord(record, editedFiles, fileAffinitySet);
-      const radius = await blastFor(fileIds);
-      const signals = computeSignals({
-        record,
-        now,
-        unicodeRank: unicodeRank.get(record.id) ?? null,
-        trigramRank: trigramRank.get(record.id) ?? null,
-        fileAffinityHit: fileAffinitySet.has(record.id),
-        blastRadius: radius,
-      });
-      const score = combineScore(signals);
-      scored.push({ record, score, normalized_score: 0, signals });
+    for (const sc of perScope) {
+      const scoredEntries = await Promise.all(
+        sc.records.map(async (record) => {
+          const fileIds = sc.fileIdsByMemory.get(record.id) ?? [];
+          const radius = await blastFor(fileIds);
+          const signals = computeSignals({
+            record,
+            now,
+            unicodeRank: sc.unicodeRank.get(record.id) ?? null,
+            trigramRank: sc.trigramRank.get(record.id) ?? null,
+            fileAffinityHit: sc.fileAffinitySet.has(record.id),
+            blastRadius: radius,
+          });
+          return {
+            record,
+            scope: sc.scope,
+            score: combineScore(signals),
+            normalized_score: 0,
+            signals,
+          } satisfies MemoryRecallResult;
+        }),
+      );
+      scored.push(...scoredEntries);
     }
 
     scored.sort((a, b) => b.score - a.score);
 
-    // Normalise to [0, 1] for display — raw score still drives ordering.
     const top = scored[0];
     const max = top ? top.score : 0;
     if (max > 0) {
@@ -155,32 +150,76 @@ export class MemoryRecall {
     return out;
   }
 
-  private async collectFileAffinityIds(editedFiles: string[]): Promise<string[]> {
-    if (editedFiles.length === 0) return [];
-    const fileIds: number[] = [];
-    if (this.intel) {
-      for (const path of editedFiles) {
-        try {
-          const id = await this.intel.getFileIdByPath(path);
-          if (id !== null) fileIds.push(id);
-        } catch {}
-      }
+  private async resolveEditedFileIds(editedFiles: string[]): Promise<number[]> {
+    const intel = this.intel;
+    if (editedFiles.length === 0 || !intel) return [];
+    const lookups = await Promise.all(
+      editedFiles.map((path) => intel.getFileIdByPath(path).catch(() => null)),
+    );
+    const ids: number[] = [];
+    for (const id of lookups) {
+      if (id !== null) ids.push(id);
     }
-    const byId = fileIds.length > 0 ? this.db.findByFileIds(fileIds, FILE_CANDIDATE_LIMIT) : [];
-    const byPath = this.db.findByPaths(editedFiles, FILE_CANDIDATE_LIMIT);
-    return Array.from(new Set([...byId, ...byPath]));
+    return ids;
   }
 
-  private async fileIdsForRecord(
-    record: MemoryRecord,
-    _editedFiles: string[],
-    _fileAffinitySet: Set<string>,
-  ): Promise<number[]> {
-    // Recall pipeline doesn't need to enumerate every file ref — just enough
-    // to compute max blast radius. The file-affinity signal already handled
-    // the membership check; this helper exists so subclasses can override.
-    void record;
-    return [];
+  private async gatherScope(
+    s: DbScopeAdapter,
+    query: string,
+    editedFiles: string[],
+    editedFileIds: number[],
+  ): Promise<{
+    scope: import("./types.js").MemoryScope;
+    records: MemoryRecord[];
+    unicodeRank: Map<string, number>;
+    trigramRank: Map<string, number>;
+    fileAffinitySet: Set<string>;
+    fileIdsByMemory: Map<string, number[]>;
+  }> {
+    const db = s.db;
+    const unicodeHits = query ? db.searchUnicode(query, FTS_CANDIDATE_LIMIT) : [];
+    let trigramHits = query ? db.searchTrigram(query, FTS_CANDIDATE_LIMIT) : [];
+    if (query && unicodeHits.length === 0 && trigramHits.length === 0) {
+      trigramHits = db.searchTrigramWithBigram(query, FTS_CANDIDATE_LIMIT);
+    }
+
+    const fileAffinityIds = collectFileAffinity(db, editedFiles, editedFileIds);
+
+    const hasDirectionalSignal =
+      unicodeHits.length > 0 || trigramHits.length > 0 || fileAffinityIds.length > 0;
+    const usageIds = hasDirectionalSignal ? [] : db.topByUsage(USAGE_CANDIDATE_LIMIT);
+
+    const candidateIds = new Set<string>();
+    for (const h of unicodeHits) candidateIds.add(h.id);
+    for (const h of trigramHits) candidateIds.add(h.id);
+    for (const id of fileAffinityIds) candidateIds.add(id);
+    for (const id of usageIds) candidateIds.add(id);
+
+    if (candidateIds.size === 0) {
+      return {
+        scope: s.scope,
+        records: [],
+        unicodeRank: new Map(),
+        trigramRank: new Map(),
+        fileAffinitySet: new Set(),
+        fileIdsByMemory: new Map(),
+      };
+    }
+
+    const idList = [...candidateIds];
+    const records = db.readMany(idList).filter((r) => !r.hidden);
+    const fileIdsByMemory = db.fileIdsByMemoryIds
+      ? db.fileIdsByMemoryIds(records.map((r) => r.id))
+      : new Map<string, number[]>();
+
+    return {
+      scope: s.scope,
+      records,
+      unicodeRank: rankMap(unicodeHits.map((h) => h.id)),
+      trigramRank: rankMap(trigramHits.map((h) => h.id)),
+      fileAffinitySet: new Set(fileAffinityIds),
+      fileIdsByMemory,
+    };
   }
 }
 
@@ -235,4 +274,23 @@ function combineScore(signals: MemoryRecallSignals): number {
   // a pinned row — but pinned alone is never enough.
   const bonus = signals.use_count + signals.recency + signals.blast_radius + signals.pinned;
   return directional + bonus;
+}
+function isAdapterArray(v: DbLike | readonly DbScopeAdapter[]): v is readonly DbScopeAdapter[] {
+  return Array.isArray(v);
+}
+
+function filterScopes(
+  scopes: readonly DbScopeAdapter[],
+  readScope: MemoryRecallOptions["readScope"],
+): DbScopeAdapter[] {
+  if (!readScope || readScope === "all" || readScope === "both") return [...scopes];
+  return scopes.filter((s) => s.scope === readScope);
+}
+
+function collectFileAffinity(db: DbLike, editedFiles: string[], editedFileIds: number[]): string[] {
+  if (editedFiles.length === 0 && editedFileIds.length === 0) return [];
+  const byId =
+    editedFileIds.length > 0 ? db.findByFileIds(editedFileIds, FILE_CANDIDATE_LIMIT) : [];
+  const byPath = editedFiles.length > 0 ? db.findByPaths(editedFiles, FILE_CANDIDATE_LIMIT) : [];
+  return Array.from(new Set([...byId, ...byPath]));
 }

@@ -719,6 +719,30 @@ export class MemoryDB {
         ?.c ?? 0
     );
   }
+
+  /**
+   * Bulk file_id lookup for recall scoring. Given a set of memory ids,
+   * returns each id mapped to the list of file_ids it's tied to (excluding
+   * nulls — un-resolved paths cannot contribute to blast radius).
+   * One query, no N+1 round-trip.
+   */
+  fileIdsByMemoryIds(memoryIds: string[]): Map<string, number[]> {
+    const out = new Map<string, number[]>();
+    if (memoryIds.length === 0) return out;
+    const placeholders = memoryIds.map(() => "?").join(",");
+    const rows = this.db
+      .query<{ memory_id: string; file_id: number }, string[]>(
+        `SELECT memory_id, file_id FROM memory_files
+         WHERE file_id IS NOT NULL AND memory_id IN (${placeholders})`,
+      )
+      .all(...memoryIds);
+    for (const r of rows) {
+      const list = out.get(r.memory_id);
+      if (list) list.push(r.file_id);
+      else out.set(r.memory_id, [r.file_id]);
+    }
+    return out;
+  }
 }
 
 function normalize(s: string): string {

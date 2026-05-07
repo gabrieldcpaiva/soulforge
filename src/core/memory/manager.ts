@@ -115,10 +115,16 @@ export class MemoryManager {
   }
 
   setSettingsScope(scope: SettingsScope): void {
-    if (this._settingsScope !== scope) {
-      this.deleteConfig(this._settingsScope);
+    if (this._settingsScope === scope) {
+      this.saveConfig(scope);
+      return;
     }
+    // Atomic: write the new file first, only then delete the old.
+    // A crash mid-call leaves both files; loadConfig picks project first
+    // (deterministic). Worst case: stale config in old slot, easy to clean.
+    const previous = this._settingsScope;
     this.saveConfig(scope);
+    this.deleteConfigOnly(previous);
   }
 
   private getDb(scope: MemoryScope): MemoryDB {
@@ -355,5 +361,14 @@ export class MemoryManager {
       project: this.projectDb.legacyBackupPath,
       global: this.globalDb.legacyBackupPath,
     };
+  }
+
+  private deleteConfigOnly(from: "project" | "global"): void {
+    const path = this.configPath(from);
+    if (existsSync(path)) {
+      try {
+        rmSync(path);
+      } catch {}
+    }
   }
 }

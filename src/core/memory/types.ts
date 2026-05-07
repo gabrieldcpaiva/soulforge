@@ -51,6 +51,8 @@ export interface MemoryRecallSignals {
 
 export interface MemoryRecallResult {
   record: MemoryRecord;
+  /** Which scope DB this candidate came from. */
+  scope: MemoryScope;
   score: number;
   normalized_score: number;
   signals: MemoryRecallSignals;
@@ -62,3 +64,14 @@ export interface MemoryIndex {
   byCategory: Record<MemoryCategory, number>;
   pinned: number;
 }
+/**
+ * Shared template for the synthetic assistant ack that pairs with the
+ * <recalled_memories> user message. Compaction extractor matches the same
+ * shape (see compaction/extractor.ts) — keep them in sync via this helper.
+ */
+export function MEMORY_RECALL_ACK(count: number): string {
+  return `Acknowledged — ${String(count)} relevant memor${count === 1 ? "y" : "ies"} surfaced.`;
+}
+
+/** Regex that matches MEMORY_RECALL_ACK output of any count. */
+export const MEMORY_RECALL_ACK_PATTERN = /^Acknowledged — \d+ relevant memor(?:y|ies) surfaced\.$/;

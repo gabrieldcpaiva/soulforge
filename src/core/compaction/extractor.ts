@@ -1,4 +1,5 @@
 import type { ModelMessage } from "ai";
+import { MEMORY_RECALL_ACK_PATTERN } from "../memory/types.js";
 import type { WorkingStateManager } from "./working-state.js";
 
 /**
@@ -148,7 +149,7 @@ export function extractFromAssistantMessage(wsm: WorkingStateManager, message: M
   if (!text || text.length < 20) return;
   // Skip the recall-pair acknowledgement ("Acknowledged — N relevant memor…")
   // — it's a synthetic ack, not assistant reasoning worth preserving.
-  if (/^Acknowledged — \d+ relevant memor(?:y|ies) surfaced\.$/.test(text.trim())) return;
+  if (MEMORY_RECALL_ACK_PATTERN.test(text.trim())) return;
 
   const sentences = text
     .split(/(?<=[.!?])\s+/)

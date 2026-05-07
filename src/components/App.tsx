@@ -1159,6 +1159,25 @@ export function App({
     if (nvimError) addSystemMessage(`Neovim error: ${nvimError}`);
   }, [nvimError]);
 
+  // Surface a one-time notice when a legacy memory DB was rotated aside on
+  // first open (Phase 1 schema migration). Skipped after the first tick so
+  // re-mounts inside the same process don't re-toast.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only
+  useEffect(() => {
+    const memMgr = contextManager.getMemoryManager();
+    const { project, global } = memMgr.getLegacyBackupPaths();
+    const parts: string[] = [];
+    if (project) parts.push(`project: ${project}`);
+    if (global) parts.push(`global: ${global}`);
+    if (parts.length > 0) {
+      addSystemMessage(
+        `Legacy memory schema detected — your old DB was preserved at ${parts.join(
+          ", ",
+        )}. Phase 1 schema is now active in .soulforge/memory.db.`,
+      );
+    }
+  }, []);
+
   const handleNewSession = useCallback(async () => {
     const activeChat = tabMgrRef.current?.getActiveChat();
     const hasContent = activeChat?.messages.some(
