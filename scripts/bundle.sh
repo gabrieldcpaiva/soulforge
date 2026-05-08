@@ -455,6 +455,53 @@ else
   fi
 fi
 
+# ── Verify critical runtime artifacts (issue #66) ────────────────────
+# Detect platform-arch for native lib triplet (matches process.platform/arch in JS).
+case "$(uname -s)" in
+  Darwin) NATIVE_PLATFORM="darwin"; LIB_EXT="dylib" ;;
+  Linux)  NATIVE_PLATFORM="linux";  LIB_EXT="so"    ;;
+  *)      NATIVE_PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')"; LIB_EXT="so" ;;
+esac
+case "$(uname -m)" in
+  x86_64|amd64) NATIVE_ARCH="x64" ;;
+  aarch64|arm64) NATIVE_ARCH="arm64" ;;
+  *)             NATIVE_ARCH="$(uname -m)" ;;
+esac
+NATIVE_TRIPLET="${NATIVE_PLATFORM}-${NATIVE_ARCH}"
+NATIVE_LIB="${SOULFORGE_DIR}/native/${NATIVE_TRIPLET}/libopentui.${LIB_EXT}"
+
+REQUIRED_FILES=(
+  "${BIN_DIR}/soulforge"
+  "${SOULFORGE_DIR}/wasm/tree-sitter.wasm"
+  "${SOULFORGE_DIR}/init.lua"
+  "${NATIVE_LIB}"
+)
+MISSING=()
+for f in "${REQUIRED_FILES[@]}"; do
+  [[ -f "$f" ]] || MISSING+=("$f")
+done
+if [[ ${#MISSING[@]} -gt 0 ]]; then
+  echo "" >&2
+  echo "ERROR: SoulForge install incomplete — missing files:" >&2
+  for f in "${MISSING[@]}"; do echo "  - $f" >&2; done
+  echo "" >&2
+  echo "  source: ${SCRIPT_DIR}" >&2
+  echo "  triplet: ${NATIVE_TRIPLET}" >&2
+  if [[ ! -d "${SCRIPT_DIR}/deps/native/${NATIVE_TRIPLET}" ]]; then
+    echo "  cause: bundled tarball does not contain native libs for ${NATIVE_TRIPLET}" >&2
+    echo "         this build was packaged for a different platform." >&2
+  else
+    echo "  cause: copy from ${SCRIPT_DIR}/deps/ failed (permissions / disk full / sandbox)" >&2
+  fi
+  echo "" >&2
+  echo "  fix: re-download the matching release tarball from" >&2
+  echo "       https://github.com/proxysoul/soulforge/releases" >&2
+  echo "       or run: brew reinstall soulforge" >&2
+  echo "" >&2
+  exit 1
+fi
+step "Verified runtime artifacts"
+
 # Enable nerd font icons (Symbols Only font is always installed)
 CONFIG_FILE="${SOULFORGE_DIR}/config.json"
 if [[ ! -f "$CONFIG_FILE" ]]; then

@@ -147,12 +147,45 @@ if (isCompile) {
   // Patch: replace dynamic platform import that Bun can't statically resolve.
   // The template literal `import(`@opentui/core-${process.platform}-${process.arch}/index.ts`)`
   // passes through the bundler verbatim, then Phase 2 compile fails trying to resolve it.
+  //
+  // Self-heal: if libopentui.{so,dylib} is missing in ~/.soulforge/native/, attempt to
+  // recover from the cellar/sibling deps/native/ tree before failing. If recovery fails,
+  // throw a precise error pointing at the missing path + remediation, instead of the
+  // misleading upstream "opentui is not supported on the current platform" message
+  // (issue #66).
   {
     const bundlePath = `${tmpDir}/soulforge.js`;
     let src = await Bun.file(bundlePath).text();
     src = src.replace(
       /\w+ = await import\(`@opentui\/core-\$\{process\.platform\}-\$\{process\.arch\}\/index\.ts`\);\s*\w+ = \w+\.default;/,
-      `targetLibPath = require("os").homedir() + "/.soulforge/native/" + process.platform + "-" + process.arch + "/libopentui." + (process.platform === "darwin" ? "dylib" : "so");`,
+      `targetLibPath = (() => {
+  const os = require("os");
+  const path = require("path");
+  const fs = require("fs");
+  const ext = process.platform === "darwin" ? "dylib" : "so";
+  const triplet = process.platform + "-" + process.arch;
+  const file = "libopentui." + ext;
+  const home = path.join(os.homedir(), ".soulforge", "native", triplet, file);
+  if (fs.existsSync(home)) return home;
+  const candidates = [];
+  try { candidates.push(path.resolve(path.dirname(process.execPath), "..", "deps", "native", triplet, file)); } catch {}
+  try { candidates.push(path.resolve(path.dirname(process.execPath), "deps", "native", triplet, file)); } catch {}
+  for (const src of candidates) {
+    try {
+      if (fs.existsSync(src)) {
+        fs.mkdirSync(path.dirname(home), { recursive: true });
+        fs.copyFileSync(src, home);
+        try { fs.chmodSync(home, 0o755); } catch {}
+        return home;
+      }
+    } catch {}
+  }
+  const msg = "SoulForge native runtime missing: " + home + "\\n" +
+    "  platform: " + triplet + "\\n" +
+    "  fix: reinstall via 'brew reinstall soulforge' or rerun the install.sh from the release tarball.\\n" +
+    "  if the problem persists, file an issue at https://github.com/proxysoul/soulforge/issues with this output.";
+  throw new Error(msg);
+})();`,
     );
     await Bun.write(bundlePath, src);
   }
