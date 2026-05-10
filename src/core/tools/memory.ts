@@ -115,7 +115,18 @@ export function createMemoryTool(deps: MemoryManager | CreateMemoryToolDeps) {
         .optional()
         .describe("list: include soft-deleted entries"),
       limit: z.number().nullable().optional().describe("search/list: max results"),
-      id: z.string().nullable().optional().describe("get/delete/restore/pin/unpin: memory id"),
+      id: z
+        .string()
+        .nullable()
+        .optional()
+        .describe("get/delete/restore/pin/unpin/supersede: memory id (8-char prefix accepted)"),
+      new_id: z
+        .string()
+        .nullable()
+        .optional()
+        .describe(
+          "supersede: id of the newer memory that replaces this one (8-char prefix accepted)",
+        ),
       merge_topics: z
         .boolean()
         .nullable()
