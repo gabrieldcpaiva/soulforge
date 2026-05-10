@@ -100,13 +100,37 @@ export function formatArgs(toolName: string, args?: string): string {
       const q = String(parsed.query);
       return q.length > 50 ? `${q.slice(0, 47)}...` : q;
     }
-    if (toolName === "memory" && parsed.action === "write" && parsed.title) {
-      const s = String(parsed.title);
-      return s.length > 50 ? `${s.slice(0, 47)}...` : s;
-    }
     if (toolName === "memory" && parsed.action) {
-      if (parsed.action === "search" && parsed.query) return `search: ${String(parsed.query)}`;
-      return String(parsed.action);
+      const action = String(parsed.action);
+      if (action === "write" && parsed.summary) {
+        const s = String(parsed.summary);
+        const cat = parsed.category ? `[${String(parsed.category)}] ` : "";
+        const label = `write: ${cat}${s}`;
+        return label.length > 60 ? `${label.slice(0, 57)}...` : label;
+      }
+      if (action === "search" && parsed.query) {
+        const q = String(parsed.query);
+        return q.length > 50 ? `search: ${q.slice(0, 42)}...` : `search: ${q}`;
+      }
+      if (action === "list") {
+        const filters: string[] = [];
+        if (parsed.category) filters.push(String(parsed.category));
+        if (parsed.topic) filters.push(`#${String(parsed.topic)}`);
+        if (parsed.pinned) filters.push("pinned");
+        return filters.length > 0 ? `list: ${filters.join(" ")}` : "list";
+      }
+      if (
+        (action === "get" ||
+          action === "delete" ||
+          action === "restore" ||
+          action === "pin" ||
+          action === "unpin") &&
+        parsed.id
+      ) {
+        const id = String(parsed.id);
+        return `${action}: ${id.length > 8 ? id.slice(0, 8) : id}`;
+      }
+      return action;
     }
     if (toolName === "dispatch" && Array.isArray(parsed.tasks)) {
       const tasks: unknown[] = parsed.tasks;

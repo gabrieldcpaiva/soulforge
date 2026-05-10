@@ -45,8 +45,28 @@ export function createMemoryTool(deps: MemoryManager | CreateMemoryToolDeps) {
   );
 
   return tool({
-    description:
-      "Persistent memory across sessions. Memory surfaces relevant entries automatically when you edit or mention related files — explicit search is only for targeted lookup. Write durable, non-code knowledge: user preferences, decisions with rationale, gotchas, project history. Don't store anything the codebase already shows (Soul Map covers that).",
+    description: [
+      "Persistent cross-session knowledge store. SQLite-backed, project + global scopes, FTS + semantic search.",
+      "",
+      "WRITE proactively when the user reveals durable knowledge a future session would need:",
+      "  • pref     — workflow/style ('use bun not npm', 'be terse')",
+      "  • decision — choice with rationale ('migrated to zustand because redux boilerplate')",
+      "  • gotcha   — non-obvious bug/quirk ('JWT expiry uses container clock, drifts in prod')",
+      "  • context  — project fact not visible in code ('legacy/ deletes next sprint')",
+      "DON'T store what the Soul Map already shows: file structure, exports, signatures, deps.",
+      "",
+      "RECALL is automatic — relevant memories are injected before each user turn based on prompt + edited files. Use action:'search' only when auto-recall missed something.",
+      "",
+      "Actions:",
+      "  write   — summary (≤200) + details (≤2000) + category + topics[≤8] + file_paths[≤16]. Auto-dedups by content hash; on near-duplicate (≥85% similar) returns similar_hints — review for contradiction.",
+      "  search  — semantic + FTS. query + optional limit/scope.",
+      "  list    — filter by category/topic/pinned/include_hidden.",
+      "  get     — full record by id (8-char prefix accepted).",
+      "  pin/unpin — pinned rows survive cleanup + rank higher in recall.",
+      "  delete  — soft-delete (restorable via restore).",
+      "",
+      "Scopes: 'project' (write default, .soulforge/memory.db) vs 'global' (~/.soulforge/memory.db). Read default 'all'.",
+    ].join("\n"),
     inputSchema: z.object({
       action: z.enum(["write", "get", "list", "search", "delete", "restore", "pin", "unpin"]),
       scope: z
