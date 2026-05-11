@@ -165,7 +165,7 @@ export function MemoryBrowser({ visible, contextManager, cwd, onClose, onSystemM
   const popupW = Math.min(120, Math.max(86, Math.floor(tw * 0.85)));
   const popupH = Math.min(36, Math.max(20, th - 4));
   const SIDEBAR_W = 22;
-  const contentW = popupW - SIDEBAR_W - 4;
+  const contentW = popupW - SIDEBAR_W - 9;
 
   const [tab, setTab] = useState<Tab>("All");
   const [query, setQuery] = useState("");
