@@ -54,6 +54,7 @@
             "group": "Tools",
             "pages": [
               "tools/hearth",
+              "tools/memory",
               "tools/editor",
               "tools/lsp",
               "tools/project",
