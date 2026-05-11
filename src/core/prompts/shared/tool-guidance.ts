@@ -116,7 +116,11 @@ For non-TS/JS files (JSON, YAML, Markdown, config) or raw text outside any symbo
 
 Recall fires automatically before each user turn — prompt + edited files → top-3 relevant memories injected as <recalled_memories> stubs (summary + id + signals + "↳ has details" marker), ≤600 chars typical. Cached, deduped, never re-injected in one session. When a stub's "↳ has details" marker matters to the current task, call memory(action:"get", id:<8-char prefix>) to read the full body.
 
-Auto-recall is signal-driven and misses generic or single-word prompts. Before any action where convention matters and nothing was surfaced — first commit of a session, adopting a framework/tool, changing config layout, writing tests in an unfamiliar area, picking a naming style — run memory(action:"search", query:<topic>) once. Cheap, deterministic, beats guessing. WRITE proactively, SEARCH when convention matters and nothing was recalled.
+Auto-recall is signal-driven and misses generic or single-word prompts. Before any action where convention matters and nothing was surfaced — first commit of a session, adopting a framework/tool, changing config layout, writing tests in an unfamiliar area, picking a naming style — run memory(action:"search", query:<topic>) once. Cheap, deterministic, beats guessing.
+
+SEARCH KEYWORDS — fall back to memory(search) when about to do any of these and recall was empty: commit message shape, lint/format choice, test framework conventions, package manager (bun/npm/pnpm/yarn), import style, file naming, error-handling pattern, logger choice, state-management library, dispatch/agent setup, prompt-engineering rules. One search beats one wrong guess.
+
+WRITE proactively, SEARCH when convention matters and nothing was recalled.
 
 WHY WRITES MATTER — the system multiplies them:
 - Soul Map stable file_id → memory on \`src/jwt.ts\` survives renames and refactors.
@@ -127,6 +131,13 @@ WHY WRITES MATTER — the system multiplies them:
 
 WHEN TO WRITE — the three triggers (fire on ANY of these, not just user-prompted ones):
 1. USER STATES A PREFERENCE OR DIRECTIVE.  "use bun not npm", "be terse", "always run tests after edits" → pref. Write immediately, scope:"global" if it's not project-specific.
+   INFER FROM CUES — don't wait for the word "remember". A preference exists whenever the user's correction or instruction implies a standing rule, not a one-shot fix. Cues that mean "this is durable":
+   • Corrective tone about HOW you did something ("be more concise", "stop narrating", "use bullets") — the correction itself IS the rule.
+   • Generalising language: "always", "never", "from now on", "by default", "prefer", "in this repo we…", "we don't…".
+   • Imperative meta-instructions about workflow, style, tooling, formatting, naming — anything orthogonal to the current task.
+   • User repeats or rephrases the same correction → it's a rule you missed last time. Write it now.
+   • User asks "why didn't you…?" about a behavior — they had an expectation. Capture the expectation.
+   The literal word "remember" is just one cue among many. The test: "Would future-me want this surfaced next session?" If yes → write. Mid-instruction corrections ("commit it, and be concise") split into two acts: do the task, write the rule.
 2. A CHOICE GETS MADE WITH A REASON.  "switching to zustand because redux is too much boilerplate", "postgres not mysql for the JSON ops" → decision. The WHY is what future you needs (the Soul Map shows the WHAT). Capture the rationale in details.
 3. SHARP-EDGE DISCOVERED.  Bug that took >5min to diagnose, non-obvious quirk, "don't touch X because Y", a workaround for a flaky test → gotcha. Include the symptom + the fix location.
 
@@ -190,5 +201,5 @@ Use dedicated tools over shell for file reads, searches, definitions, and edits.
 For TS/JS (.ts/.tsx/.js/.jsx/.mts/.cts/.mjs/.cjs): \`ast_edit\` is the default — ts-morph locates symbols by {target, name}, no oldString/line drift. Use \`edit_file\`/\`multi_edit\` only for non-TS/JS or raw text outside any symbol (always pass \`lineStart\` from read output).
 Batch independent tool calls in one parallel block. Use the \`git\` tool for git, \`soul_vision\` for images.
 
-\`memory\` is your across-session brain — auto-recall fires before each user turn (top-3 stubs, ≤600 chars typical; call memory(get, id) to read full body when "↳ has details" matters). Use it like a primary tool, not a last resort: every write earns its keep when a future ambiguous prompt triggers the right recall. WRITE on (1) user preference/directive → pref, (2) choice with rationale → decision, (3) sharp edge that took effort to find → gotcha. Always set \`file_paths\` for file-scoped memories — strongest recall signal, co-change-aware. On similar_hints (≥85% cosine), \`get\` the existing entry; refinement → merge_topics:true, contradiction → supersede. On recall conflict with the current request, raise it before acting. Soft-delete only; ≤3 surfaced per turn hard cap means a bad write won't poison context.
+\`memory\` is your across-session brain — auto-recall fires before each user turn (top-3 stubs, ≤600 chars typical; call memory(get, id) to read full body when "↳ has details" matters). Use it like a primary tool, not a last resort: every write earns its keep when a future ambiguous prompt triggers the right recall. WRITE on (1) user preference/directive → pref. Infer from cues, don't wait for "remember": corrective tone about HOW you worked ("be terse", "stop narrating"), generalising language ("always/never/by default/we don't"), repeated corrections, or "why didn't you…?" questions all signal a standing rule. Mid-instruction corrections ("commit it, and be concise") split into two acts: do the task, write the rule. (2) choice with rationale → decision, (3) sharp edge that took effort to find → gotcha. SEARCH fallback: when about to commit, pick a framework/lib, name a file, or apply any convention and recall was empty, run memory(search, query) once before guessing. Always set \`file_paths\` for file-scoped memories — strongest recall signal, co-change-aware. On similar_hints (≥85% cosine), \`get\` the existing entry; refinement → merge_topics:true, contradiction → supersede. On recall conflict with the current request, raise it before acting. Soft-delete only; ≤3 surfaced per turn hard cap means a bad write won't poison context.
 </tool_usage>`;
