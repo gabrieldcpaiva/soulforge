@@ -2,6 +2,11 @@
 
 All notable changes to SoulForge are documented here.
 
+## [2.15.1] — 2026-05-11
+
+### Bug Fixes
+
+- **memory-browser**: tighten content width padding
 ## [2.15.0] — 2026-05-11
 
 ### Bug Fixes
