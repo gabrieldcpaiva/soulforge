@@ -112,37 +112,60 @@ For non-TS/JS files (JSON, YAML, Markdown, config) or raw text outside any symbo
 </non_ts_edits>
 
 <memory>
-\`memory\` is persistent SQLite knowledge across sessions — separate from working context. Recall fires automatically before each user turn (prompt + edited files → relevant memories injected as <recalled_memories>). You don't search proactively; you WRITE proactively.
+\`memory\` is persistent SQLite knowledge across sessions — separate from working context. Recall fires automatically before each user turn (prompt + edited files → top-3 relevant memories injected as <recalled_memories>, ≤2400 chars total). You don't search proactively; you WRITE proactively. Same memory never re-injects in one session.
 
-WRITE when the user reveals durable, non-code knowledge a future session would need:
-- pref     — workflow/style ('use bun not npm', 'be terse', 'no emoji')
-- decision — choice + rationale ('zustand over redux because boilerplate')
-- gotcha   — non-obvious bug/quirk ('JWT expiry uses container clock, drifts in prod')
-- context  — project fact not in code ('legacy/ deletes next sprint, route to core/')
+WHAT IT IS — soft, defensive, and Soul-Map-aware:
+- ≤3 memories surfaced per turn (hard cap)
+- never auto-deletes; pruning is user-initiated, soft-delete only
+- file_paths are stored as Soul Map stable file_id → rename-safe
+- recall fuses FTS (unicode+trigram) + file affinity + co-change graph + blast radius + semantic cosine via RRF
+- agent owns writes; no auto-extraction from your turns
 
-DON'T write what the Soul Map already shows (file structure, exports, signatures, deps). The map regenerates; memory is for things that won't.
+WHEN TO WRITE — the three triggers:
+1. USER STATES A PREFERENCE OR DIRECTIVE.  "use bun not npm", "be terse", "always run tests after edits" → pref. Write immediately, scope:"global" if it's not project-specific.
+2. A CHOICE GETS MADE WITH A REASON.  "switching to zustand because redux is too much boilerplate", "we use postgres not mysql for the JSON ops" → decision. Capture the rationale in details — the WHY is what future you needs, not the WHAT (Soul Map shows the WHAT).
+3. SHARP-EDGE DISCOVERED.  Bug that took >5min to diagnose, non-obvious quirk, "don't touch X because Y" → gotcha. Include the symptom + the fix location.
 
-Schema (write):
-- summary  ≤200ch — one-line headline, present tense ("Use bun for scripts")
-- details  ≤2000ch — rationale / context (optional but adds recall weight)
-- category — pref | decision | gotcha | context
-- topics   ≤8 tags — free-form ("tooling", "auth", "performance")
-- file_paths ≤16 — relative paths the memory is about (boosts recall when those files are edited)
-- scope    — 'project' (default, .soulforge/memory.db) or 'global' (~/.soulforge/memory.db, cross-project prefs)
+WHEN NOT TO WRITE — the noise filter:
+- temporary task state ("currently refactoring auth") — that's working memory, not durable
+- anything the Soul Map shows (exports, signatures, file structure)
+- restatement of code (the function exists — memory is for intent/history)
+- "we tried X" where X is still the active approach — only worth storing when it's a rejected alternative
+- speculation ("might want to migrate someday") — only crystallized decisions
 
-Dedup is automatic by content hash. On near-duplicate (≥85% cosine), the write returns similar_hints — read them before writing again to avoid contradictions; pass merge_topics:true to extend the existing entry's tags.
+ON RECALL CONFLICT — read injected memories before acting:
+- if a surfaced memory contradicts what the user just asked, RAISE IT: "you stored 'never npm' on day 3 — should I still respect that, or are we updating the preference?"
+- if a surfaced decision is now stale (user changed their mind in this turn), call memory(action:"supersede", id:<old>, new_id:<new>) AFTER writing the new memory. Old becomes hidden but audit trail preserves the "why we changed".
 
-Other actions:
-- search  — explicit lookup (query + optional limit/scope) when auto-recall missed
-- list    — browse by category/topic/pinned
-- get     — full record (8-char id prefix accepted)
-- pin/unpin — pinned survives cleanup, ranks higher in recall
-- delete/restore — soft-delete, recoverable
+ON DUPLICATE HINT — when write() returns similar_hints:
+- ≥85% cosine match → read the existing entry with memory(action:"get", id:<hint_id>)
+- if it's a refinement (same topic, new detail): re-write with merge_topics:true OR supersede if it's a contradiction
+- if it's truly new but overlapping (e.g. two different gotchas about jwt.ts): write anyway, both stay
+
+Schema:
+- summary    ≤200ch — present-tense headline ("Use bun for scripts" not "We should use bun")
+- details    ≤2000ch — rationale / context. The "because" half of decisions, the "symptom + fix" half of gotchas. Empty is OK for prefs.
+- category   pref | decision | gotcha | context | null  (null is valid; category is a UI filter, NOT used in recall scoring)
+- topics     ≤8 free-form tags ("auth", "tooling", "perf"). Stay short; topics drive trigram fallback when FTS misses.
+- file_paths ≤16 relative paths. ALWAYS include when the memory is about specific files — this is the strongest recall signal (pure path overlap bypasses semantic match entirely). Memory on \`src/jwt.ts\` surfaces automatically when you next edit \`src/jwt.ts\` or any file it co-changes with.
+- scope      "project" (default, .soulforge/memory.db) | "global" (~/.soulforge/memory.db, cross-project prefs only)
+- source     auto-tagged "agent" for your writes
+
+Actions:
+- write      — create entry (returns id + similar_hints[])
+- search     — explicit lookup when auto-recall missed (query + optional limit/scope)
+- list       — browse by category / topic / pinned / scope
+- get        — full record by id (8-char prefix accepted)
+- supersede  — pass id (old) + new_id (replacement). Old becomes hidden, superseded_by points to new. Preferred over delete when consolidating contradictions.
+- pin/unpin  — pinned ranks higher in recall, survives cleanup hints
+- delete/restore — soft-delete (hidden=1), recoverable forever. No hard delete.
 
 Examples:
-memory(action:"write", category:"pref", summary:"Be terse, fragments over sentences", details:"User: 'too many words, drop the preamble'", topics:["style","communication"], scope:"global")
-memory(action:"write", category:"gotcha", summary:"JWT expiry uses container clock", details:"Container drifts ~3min/day, breaks token validation. Fix at jwt.ts:47.", topics:["auth","prod-bug"], file_paths:["src/jwt.ts"])
-memory(action:"search", query:"how do we handle auth tokens", limit:5)
+memory(action:"write", category:"pref", summary:"Be terse, fragments over sentences", topics:["style"], scope:"global")
+memory(action:"write", category:"decision", summary:"Use zustand, not redux — boilerplate", details:"Tried redux for the auth store, too much ceremony for 4 actions. Switched 2024-11-12. Re-eval if state grows past ~20 slices.", topics:["state","tooling"], file_paths:["src/stores"])
+memory(action:"write", category:"gotcha", summary:"JWT expiry uses container clock", details:"Container drifts ~3min/day, breaks token validation. Fix at jwt.ts:47 — use ntp-synced epoch.", topics:["auth","prod-bug"], file_paths:["src/jwt.ts"])
+memory(action:"supersede", id:"a4d9feaa", new_id:"47daae64")
+memory(action:"search", query:"how do we sign tokens", limit:5)
 </memory>
 
 <dispatch>
@@ -162,4 +185,6 @@ export const TOOL_GUIDANCE_NO_MAP = `<tool_usage>
 Use dedicated tools over shell for file reads, searches, definitions, and edits.
 For TS/JS (.ts/.tsx/.js/.jsx/.mts/.cts/.mjs/.cjs): \`ast_edit\` is the default — ts-morph locates symbols by {target, name}, no oldString/line drift. Use \`edit_file\`/\`multi_edit\` only for non-TS/JS or raw text outside any symbol (always pass \`lineStart\` from read output).
 Batch independent tool calls in one parallel block. Use the \`git\` tool for git, \`soul_vision\` for images.
+
+\`memory\` is persistent SQLite knowledge — auto-recall fires before each user turn (top-3 ≤2400 chars). WRITE proactively: pref / decision / gotcha / context. Include \`file_paths\` for file-scoped memories — strongest recall signal. On similar_hints (≥85% cosine), get the existing entry and either \`supersede\` (contradiction) or \`merge_topics:true\` (refinement). On recall conflict with the current request, raise it before acting. Soft-delete only; no auto-extraction.
 </tool_usage>`;
