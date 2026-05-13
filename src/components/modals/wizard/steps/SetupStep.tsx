@@ -1,5 +1,5 @@
-import { TextAttributes } from "@opentui/core";
-import { useKeyboard } from "@opentui/react";
+import { decodePasteBytes, type PasteEvent, TextAttributes } from "@opentui/core";
+import { useKeyboard, useRenderer } from "@opentui/react";
 import { useEffect, useRef, useState } from "react";
 import { fetchGroupedModels, fetchProviderModels } from "../../../../core/llm/models.js";
 import { getAllProviders, getProvider } from "../../../../core/llm/providers/index.js";
@@ -11,7 +11,7 @@ import {
   setSecret,
 } from "../../../../core/secrets.js";
 import { useTheme } from "../../../../core/theme/index.js";
-import { Field, KeyCaps, Search, VSpacer } from "../../../ui/index.js";
+import { KeyCaps, Search, VSpacer } from "../../../ui/index.js";
 import { StepHeader } from "../primitives.js";
 import { BOLD } from "../theme.js";
 
@@ -167,6 +167,7 @@ export function SetupStep({
 }: SetupStepProps) {
   {
     const t = useTheme();
+    const renderer = useRenderer();
 
     const [phase, setPhase] = useState<Phase>("provider");
     const [cursor, setCursor] = useState(0);
@@ -210,6 +211,20 @@ export function SetupStep({
     useEffect(() => {
       setActive(isInputPhase);
     }, [isInputPhase, setActive]);
+
+    useEffect(() => {
+      if (phase !== "key") return;
+      const handler = (event: PasteEvent) => {
+        const cleaned = decodePasteBytes(event.bytes)
+          .replace(/[\n\r]/g, "")
+          .trim();
+        if (cleaned) setKeyInput((v) => v + cleaned);
+      };
+      renderer.keyInput.on("paste", handler);
+      return () => {
+        renderer.keyInput.off("paste", handler);
+      };
+    }, [phase, renderer]);
 
     useEffect(() => {
       if (phase === "fetching") {
@@ -526,7 +541,7 @@ export function SetupStep({
           </text>
 
           <VSpacer />
-          <Field label="API key" value={displayMask || " "} focused />
+          <Search value={displayMask} placeholder="paste or type your key" focused icon="key" />
           <VSpacer />
 
           <KeyCaps
