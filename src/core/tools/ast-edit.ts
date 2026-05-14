@@ -83,23 +83,36 @@ function getBackend(cwd: string): TsMorphBackend {
 export const astEditTool = {
   name: "ast_edit",
   description:
-    "AST edit for TS/JS (.ts/.tsx/.js/.jsx/.mts/.cts/.mjs/.cjs). Default editor for these files — ts-morph locates symbols by {target, name}, no oldString, no line drift. " +
+    "AST edit for TS/JS (.ts/.tsx/.js/.jsx/.mts/.cts/.mjs/.cjs). Default editor for these files — used BEFORE edit_file/multi_edit, not as fallback. ts-morph locates symbols by {target, name}: no oldString, no whitespace/escape failures, no line-offset drift. " +
     "Single op: {action, target, name, value?, newCode?, index?}. " +
-    "Multi-op (atomic, same file): {operations:[{...}, ...]} — all-or-nothing rollback. " +
+    "Multi-op (atomic, same file): {operations:[{...}, ...]} — all-or-nothing rollback. Use for 'add import + use it' in one call. " +
     "Create files: action='create_file', newCode=<full content>. " +
     "Targets: function|class|interface|type|enum|variable|method|property|constructor|arrow_function. " +
     "Class members: name='ClassName.memberName' or just 'memberName'. Arrow const: target='arrow_function', name='foo'. " +
     "Idempotent: add_import/add_named_import/add_named_reexport merge; add_constructor modifies in place. " +
-    "replace_in_body is whitespace-tolerant (tab↔space, CRLF, indent drift auto-handled) and supports anchor-pair range mode: pass value=<short unique start anchor> + valueEnd=<short unique end anchor> to replace the span between them — rewrite a 100-line block with ~20 tokens. " +
-    "Body shape — critical: set_body/add_statement/insert_statement take body CONTENTS ONLY (no surrounding {}, ts-morph wraps). " +
+    "CAN DO (no fallback): any named symbol, JSX/TSX with Unicode/special chars/escape sequences/quotes (ts-morph wraps the TS compiler — no JSX limitation), large rewrites via replace or anchor-pair replace_in_body, whitespace drift (tab↔space, CRLF↔LF, indent stripping auto-handled). " +
+    "CANNOT target: anonymous callbacks (inline arrows, IIFEs, object-literal methods without names) → use replace_in_body on the enclosing NAMED symbol. Union members inside a type alias → use replace on the whole type. Raw text inside comments/strings not bound to a symbol → replace_in_body on the enclosing symbol. " +
+    "ONLY fall back to edit_file when: non-TS/JS file (JSON/YAML/MD/config), edit entirely outside any named symbol (e.g. top-of-file banner), or file has a parse error breaking ts-morph. 'Long needle' / 'JSX special chars' are NOT fallback reasons. " +
+    "Tiers (pick smallest): MICRO (1-10 tok) set_type, set_return_type, set_async, set_export, rename, remove, set_initializer, add_parameter, set_optional. " +
+    "BODY (10-100 tok) set_body, add_statement, add_property, add_method, add_constructor, add_decorator, set_extends, add_implements, replace_in_body. " +
+    "FULL replace (whole symbol), create_file. " +
+    "FILE-LEVEL add_import, add_named_import (idempotent merges), organize_imports, fix_missing_imports, add_function/class/interface/type_alias/enum, insert_text (REQUIRES anchor: index=0|-1 or value='after-imports'|'before-exports'). " +
+    "ATOMIC operations:[{...},...] — all-or-nothing rollback. " +
+    "Body shape — get this wrong and you corrupt the file: " +
+    "set_body/add_statement/insert_statement take body CONTENTS ONLY — NO surrounding {} (ts-morph wraps; passing {…} produces {{…}}). " +
     "add_method/add_constructor/add_getter/add_setter take the FULL declaration INCLUDING braces (e.g. 'foo(x: number) { return x; }'). " +
     "replace takes the WHOLE symbol text including braces. " +
     "add_property on interface: 'name: type' or 'name?: type'; on class: 'name: type = value' or 'name = value'. " +
-    "Import ops: value=module specifier (e.g. 'zod'), newCode=comma-separated names (e.g. 'z' or 'useState,useEffect'); remove_named_import uses value=module and name=single identifier. " +
-    "Safe defaults: rename = declaration-only; use rename_global or rename_symbol for project-wide. " +
-    "CANNOT target anonymous callbacks or union members inside a type alias — use replace on the whole symbol, or replace_in_body for AST-anchored text tweaks. " +
-    "insert_text requires an anchor (index=0|-1 or value='after-imports'|'before-exports'). " +
-    "See the <ast_edit> section of the system tool_usage block for the full operation taxonomy and examples.",
+    "add_statement on expression-body arrow auto-wraps into a block — safe to call. " +
+    "replace_in_body shapes (pick smallest): SHORT ANCHOR value=<1-2 unique lines> + newCode=<replacement>. ANCHOR PAIR (RANGE) value=<short start anchor> + valueEnd=<short end anchor> + newCode=<span replacement> — rewrites a 100-line block with ~20 tokens of anchors. Exact-match ambiguity (≥2 identical hits) THROWS — add surrounding context or use anchor pair. " +
+    "Import ops: value=module specifier (e.g. 'zod'), newCode=comma-separated names (e.g. 'z' or 'useState,useEffect'). remove_named_import: value=module, name=single identifier. " +
+    "rename is declaration-only (safe default). Use rename_global / rename_symbol / move_symbol / rename_file for cross-file refactors. " +
+    "Examples — " +
+    "MICRO multi-op: ast_edit(path, operations:[{action:'set_async',target:'method',name:'UserStore.load',value:'true'},{action:'set_return_type',target:'method',name:'UserStore.load',value:'Promise<User>'}]). " +
+    "BODY: ast_edit(path, action:'add_statement', target:'function', name:'loadConfig', newCode:\"logger.info('config loaded');\"). " +
+    "ANCHOR PAIR rewrite: ast_edit(path, action:'replace_in_body', target:'function', name:'ProviderSettings', value:'const caption = (', valueEnd:'</PremiumPopup>', newCode:'<new JSX>'). " +
+    "ATOMIC import+method: ast_edit(path, operations:[{action:'add_named_import',value:'zod',newCode:'z'},{action:'add_method',target:'class',name:'Validator',newCode:\"validate(input: unknown) { return z.string().parse(input); }\"}]). " +
+    "CREATE: ast_edit('src/foo.ts', action:'create_file', newCode:'export function foo() { return 42; }\\\\n').",
   execute: async (args: AstEditArgs): Promise<ToolResult> => {
     try {
       const filePath = resolve(args.path);
