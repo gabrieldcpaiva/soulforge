@@ -37,8 +37,10 @@ describe("shared-rules content", () => {
 describe("shared-identity content", () => {
   test("enforces the tool loop contract", () => {
     expect(SHARED_IDENTITY).toContain("<tool_loop>");
-    expect(SHARED_IDENTITY).toContain("<forbidden_between_tool_calls>");
     expect(SHARED_IDENTITY).toContain("<answer_voice>");
+    // <forbidden_between_tool_calls> bullet list folded inline into <tool_loop>
+    expect(SHARED_IDENTITY).toContain("no acknowledgements");
+    expect(SHARED_IDENTITY).toContain("no self-narration");
   });
 
   test("collapsed four overlapping sections into two", () => {
@@ -106,17 +108,16 @@ describe("tool guidance content", () => {
   });
 
   test("is the single source for the workflow recipe", () => {
-    expect(TOOL_GUIDANCE_WITH_MAP).toContain("PLAN from the Soul Map");
+    expect(TOOL_GUIDANCE_WITH_MAP).toContain("PLAN from the map");
     expect(TOOL_GUIDANCE_WITH_MAP).toContain("ast_edit for TS/JS");
     expect(TOOL_GUIDANCE_WITH_MAP).toContain("project (typecheck/lint/test)");
   });
 
-  test("contains ast_edit canonical examples (MICRO / BODY / ATOMIC / CREATE)", () => {
-    expect(TOOL_GUIDANCE_WITH_MAP).toContain("MICRO");
-    expect(TOOL_GUIDANCE_WITH_MAP).toContain("BODY");
-    expect(TOOL_GUIDANCE_WITH_MAP).toContain("ATOMIC");
-    expect(TOOL_GUIDANCE_WITH_MAP).toContain("CREATE");
-    expect(TOOL_GUIDANCE_WITH_MAP).toContain("operations:");
+  test("points at ast_edit tool description for taxonomy + examples", () => {
+    // Taxonomy and MICRO/BODY/ATOMIC/CREATE examples relocated to astEditTool.description
+    // (cache-stable, lives in tool array). System prompt keeps a short pointer.
+    expect(TOOL_GUIDANCE_WITH_MAP).toContain("ast_edit");
+    expect(TOOL_GUIDANCE_WITH_MAP).toContain("tool's description");
   });
 
   test("keeps navigate / dep-search / soul_impact guidance", () => {
