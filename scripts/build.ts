@@ -29,7 +29,7 @@ const devtoolsStubPlugin: BunPlugin = {
       namespace: "devtools-stub",
     }));
     build.onLoad({ filter: /.*/, namespace: "devtools-stub" }, () => ({
-      contents: "export default { connectToDevTools() {} };",
+      contents: "export default { initialize() {}, connectToDevTools() {} };",
       loader: "js",
     }));
   },
