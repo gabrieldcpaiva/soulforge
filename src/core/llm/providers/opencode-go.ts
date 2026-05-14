@@ -4,7 +4,7 @@ import { loadConfig } from "../../../config/index.js";
 import { getProviderApiKey } from "../../secrets.js";
 import { getCompatReasoningBody } from "../compat-reasoning.js";
 import { createReasoningFetchWrapper } from "./reasoning-fetch.js";
-import type { ProviderDefinition } from "./types.js";
+import type { ProviderDefinition, ProviderModelInfo } from "./types.js";
 
 const BASE_URL = "https://opencode.ai/zen/go/v1";
 
@@ -16,7 +16,7 @@ export const opencodeGo: ProviderDefinition = {
   secretKey: "opencode-go-api-key",
   keyUrl: "opencode.ai",
   asciiIcon: "GO",
-  description: "GLM, Kimi, MiMo, MiniMax models",
+  description: "GLM, Kimi, MiMo, MiniMax, Qwen, DeepSeek models",
 
   createModel(modelId: string): LanguageModel {
     const apiKey = getProviderApiKey("OPENCODE_GO_API_KEY");
@@ -36,32 +36,55 @@ export const opencodeGo: ProviderDefinition = {
     return provider.chatModel(modelId);
   },
 
-  async fetchModels(): Promise<null> {
-    // No model listing API available
-    return null;
+  async fetchModels(): Promise<ProviderModelInfo[] | null> {
+    const apiKey = getProviderApiKey("OPENCODE_GO_API_KEY");
+    if (!apiKey) return null;
+    try {
+      const res = await fetch("https://opencode.ai/zen/go/v1/models", {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as { data: Array<{ id: string }> };
+      return data.data.map((m) => ({ id: m.id, name: m.id }));
+    } catch {
+      return null;
+    }
   },
 
+  // model list from https://opencode.ai/docs/go
   fallbackModels: [
     { id: "glm-5.1", name: "GLM 5.1" },
     { id: "glm-5", name: "GLM 5" },
+    { id: "kimi-k2.6", name: "Kimi K2.6" },
     { id: "kimi-k2.5", name: "Kimi K2.5" },
-    { id: "mimo-v2-pro", name: "MiMo V2 Pro" },
-    { id: "mimo-v2-omni", name: "MiMo V2 Omni" },
+    { id: "mimo-v2.5-pro", name: "MiMo V2.5 Pro" },
+    { id: "mimo-v2.5", name: "MiMo V2.5" },
     { id: "minimax-m2.7", name: "MiniMax M2.7" },
     { id: "minimax-m2.5", name: "MiniMax M2.5" },
+    { id: "qwen3.6-plus", name: "Qwen3.6 Plus" },
+    { id: "qwen3.5-plus", name: "Qwen3.5 Plus" },
+    { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro" },
+    { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash" },
   ],
 
   contextWindows: [
     // GLM models: ~200k context window (docs.z.ai)
     ["glm-5.1", 204_800],
     ["glm-5", 204_800],
-    // Kimi K2.5: standard 128k
-    ["kimi-k2.5", 131_072],
-    // MiMo models: assumed standard
-    ["mimo-v2-pro", 131_072],
-    ["mimo-v2-omni", 131_072],
+    // Kimi K2.5/K2.6
+    ["kimi-k2.6", 262_000],
+    ["kimi-k2.5", 262_000],
+    // MiMo V2.5 — docs say ≤ 256K
+    ["mimo-v2.5-pro", 262_144],
+    ["mimo-v2.5", 262_144],
     // MiniMax
-    ["minimax-m2.7", 131_072],
-    ["minimax-m2.5", 131_072],
+    ["minimax-m2.7", 196_000],
+    ["minimax-m2.5", 196_000],
+    // Qwen
+    ["qwen3.6-plus", 1_000_000],
+    ["qwen3.5-plus", 1_000_000],
+    // DeepSeek V4
+    ["deepseek-v4-pro", 131_072],
+    ["deepseek-v4-flash", 131_072],
   ],
 };

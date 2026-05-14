@@ -33,12 +33,20 @@ export const llmgateway: ProviderDefinition = {
   },
 
   fallbackModels: [
+    { id: "claude-opus-4-7", name: "Claude Opus 4.7" },
+    { id: "claude-opus-4-6", name: "Claude Opus 4.6" },
+    { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
+    { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5" },
+    { id: "claude-haiku-4-5", name: "Claude Haiku 4.5" },
+    { id: "gpt-5.5", name: "GPT-5.5" },
+    { id: "gpt-5.4", name: "GPT-5.4" },
+    { id: "gpt-5.4-mini", name: "GPT-5.4 Mini" },
+    { id: "gpt-5", name: "GPT-5" },
     { id: "gpt-4o", name: "GPT-4o" },
-    { id: "gpt-4o-mini", name: "GPT-4o Mini" },
-    { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4" },
-    { id: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku" },
-    { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash" },
-    { id: "deepseek-chat", name: "DeepSeek Chat" },
+    { id: "gemini-3.1-pro-preview", name: "Gemini 3.1 Pro" },
+    { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
+    { id: "grok-4.3", name: "Grok 4.3" },
+    { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro" },
   ],
 
   // Corrections for known-incorrect upstream API values.
@@ -55,6 +63,7 @@ export const llmgateway: ProviderDefinition = {
   // Specific overrides first → shared patterns → generic catch-alls last.
   contextWindows: [
     // Claude (LLM Gateway uses hyphens: claude-opus-4-6)
+    ["claude-opus-4-7", 1_000_000],
     ["claude-opus-4-6", 1_000_000],
     ["claude-sonnet-4-6", 200_000],
     ["claude-sonnet-4-5", 200_000],
