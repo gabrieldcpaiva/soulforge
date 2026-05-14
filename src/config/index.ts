@@ -43,7 +43,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     args: [],
   },
   theme: {
-    name: "dark",
+    name: "proxysoul-main",
     transparent: true,
   },
   nvimConfig: "default",
