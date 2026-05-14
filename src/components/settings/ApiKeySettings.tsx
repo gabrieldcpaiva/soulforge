@@ -55,6 +55,7 @@ interface ApiKeyState {
   keys: Record<string, SecretSources>;
   priority: KeyPriority;
   refresh: (items: KeyItem[]) => void;
+  refreshOne: (id: SecretKey) => void;
 }
 
 function buildKeys(items: KeyItem[], priority: KeyPriority): Record<string, SecretSources> {
@@ -65,6 +66,8 @@ const useApiKeyStore = create<ApiKeyState>()((set, get) => ({
   keys: {},
   priority: getDefaultKeyPriority(),
   refresh: (items: KeyItem[]) => set({ keys: buildKeys(items, get().priority) }),
+  refreshOne: (id: SecretKey) =>
+    set((state) => ({ keys: { ...state.keys, [id]: getSecretSources(id, state.priority) } })),
 }));
 
 interface MenuRow extends GroupedItem {
@@ -93,6 +96,7 @@ export function ApiKeySettings({ visible, onClose }: Props) {
   const keys = useApiKeyStore((s) => s.keys);
   const priority = useApiKeyStore((s) => s.priority);
   const refresh = useApiKeyStore((s) => s.refresh);
+  const refreshOne = useApiKeyStore((s) => s.refreshOne);
 
   const [cursor, setCursor] = useState(0);
   const [mode, setMode] = useState<"menu" | "input">("menu");
@@ -150,9 +154,8 @@ export function ApiKeySettings({ visible, onClose }: Props) {
           id: `${k.id}-remove`,
           kind: "remove",
           targetKey: k.id,
-          label: `Remove ${k.label}`,
-          status: "error",
-          meta: "delete stored key",
+          prefix: "↳",
+          label: "remove stored key",
         });
       }
       return out;
@@ -216,24 +219,25 @@ export function ApiKeySettings({ visible, onClose }: Props) {
       setMode("menu");
       return;
     }
-    const result = setSecret(inputTarget, inputValue.trim());
+    const target = inputTarget;
+    setMode("menu");
+    setInputValue("");
+    setInputTarget(null);
+    const result = setSecret(target, inputValue.trim());
     if (result.success) {
       const where = result.storage === "keychain" ? "OS keychain" : (result.path ?? "secrets.json");
       popFlash("ok", `Saved to ${where}`);
     } else {
       popFlash("err", "Failed to save key");
     }
-    refresh(keyItems);
-    setMode("menu");
-    setInputValue("");
-    setInputTarget(null);
+    refreshOne(target);
   };
 
   const removeKey = (keyId: SecretKey) => {
     const result = deleteSecret(keyId);
     if (result.success) popFlash("ok", `Removed from ${result.storage}`);
     else popFlash("err", "Key not found");
-    refresh(keyItems);
+    refreshOne(keyId);
   };
 
   useKeyboard((evt) => {

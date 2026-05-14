@@ -62,7 +62,7 @@ function keychainGet(key: SecretKey): string | null {
       const result = spawnSync(
         "security",
         ["find-generic-password", "-a", KEYCHAIN_SERVICE, "-s", key, "-w"],
-        { timeout: 5000, encoding: "utf-8" },
+        { timeout: 5000, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] },
       );
       if (result.status === 0 && result.stdout) {
         return result.stdout.trim();
@@ -74,6 +74,7 @@ function keychainGet(key: SecretKey): string | null {
       const result = spawnSync("secret-tool", ["lookup", "service", KEYCHAIN_SERVICE, "key", key], {
         timeout: 5000,
         encoding: "utf-8",
+        stdio: ["ignore", "pipe", "ignore"],
       });
       if (result.status === 0 && result.stdout) {
         return result.stdout.trim();
@@ -89,15 +90,23 @@ function keychainSet(key: SecretKey, value: string): boolean {
     if (process.platform === "darwin") {
       spawnSync("security", ["delete-generic-password", "-a", KEYCHAIN_SERVICE, "-s", key], {
         timeout: 5000,
+        stdio: ["ignore", "ignore", "ignore"],
       });
       // H3: prior form passed the token as `-w <value>` which is visible in
       // `ps auxww` while `security` runs. The `-w` flag without a value makes
       // `security` read the password from stdin; pipe it in via the `input`
-      // option so the secret never touches argv.
+      // option so the secret never touches argv. stdio must explicitly ignore
+      // stderr — otherwise `security` writes its "password data for new item:"
+      // prompt to the inherited TTY and leaks into the rendered UI.
       const result = spawnSync(
         "security",
-        ["add-generic-password", "-a", KEYCHAIN_SERVICE, "-s", key, "-w"],
-        { input: `${value}\n`, timeout: 5000, encoding: "utf-8" },
+        ["add-generic-password", "-U", "-a", KEYCHAIN_SERVICE, "-s", key, "-w"],
+        {
+          input: `${value}\n`,
+          timeout: 5000,
+          encoding: "utf-8",
+          stdio: ["pipe", "ignore", "ignore"],
+        },
       );
       return result.status === 0;
     }
@@ -106,7 +115,12 @@ function keychainSet(key: SecretKey, value: string): boolean {
       const result = spawnSync(
         "secret-tool",
         ["store", "--label", `SoulForge ${key}`, "service", KEYCHAIN_SERVICE, "key", key],
-        { input: value, timeout: 5000, encoding: "utf-8" },
+        {
+          input: value,
+          timeout: 5000,
+          encoding: "utf-8",
+          stdio: ["pipe", "ignore", "ignore"],
+        },
       );
       return result.status === 0;
     }
@@ -120,7 +134,7 @@ function keychainDelete(key: SecretKey): boolean {
       const result = spawnSync(
         "security",
         ["delete-generic-password", "-a", KEYCHAIN_SERVICE, "-s", key],
-        { timeout: 5000 },
+        { timeout: 5000, stdio: ["ignore", "ignore", "ignore"] },
       );
       return result.status === 0;
     }
@@ -128,6 +142,7 @@ function keychainDelete(key: SecretKey): boolean {
     if (process.platform === "linux") {
       const result = spawnSync("secret-tool", ["clear", "service", KEYCHAIN_SERVICE, "key", key], {
         timeout: 5000,
+        stdio: ["ignore", "ignore", "ignore"],
       });
       return result.status === 0;
     }
