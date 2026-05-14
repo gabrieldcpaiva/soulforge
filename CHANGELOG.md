@@ -2,6 +2,11 @@
 
 All notable changes to SoulForge are documented here.
 
+## [2.15.5] — 2026-05-14
+
+### Bug Fixes
+
+- **build**: stub react-devtools-core initialize to prevent TUI crash
 ## [2.15.4] — 2026-05-13
 
 ### Bug Fixes
