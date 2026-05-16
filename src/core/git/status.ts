@@ -520,3 +520,7 @@ export async function buildGitContext(cwd: string): Promise<string | null> {
 
   return lines.join("\n");
 }
+export async function gitResetHard(cwd: string): Promise<{ ok: boolean; output: string }> {
+  const { ok, stdout } = await run(["reset", "--hard", "HEAD"], cwd);
+  return { ok, output: stdout };
+}

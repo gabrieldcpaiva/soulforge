@@ -1,6 +1,14 @@
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useEffect, useRef, useState } from "react";
-import { getGitLog, gitPull, gitPush, gitStash, gitStashPop } from "../../core/git/status.js";
+import {
+  getGitLog,
+  gitPull,
+  gitPush,
+  gitResetHard,
+  gitStash,
+  gitStashPop,
+} from "../../core/git/status.js";
+import { confirm } from "../ui/dialogs/index.js";
 import {
   buildGroupedRows,
   type GroupedItem,
@@ -27,6 +35,20 @@ const MENU_ITEMS: MenuItem[] = [
     action: "stash-pop",
   },
   { id: "log", keyHint: "l", label: "Log", meta: "show recent commits", action: "log" },
+  {
+    id: "force-push",
+    keyHint: "f",
+    label: "Force Push",
+    meta: "git push --force-with-lease (confirms)",
+    action: "force-push",
+  },
+  {
+    id: "reset-hard",
+    keyHint: "r",
+    label: "Reset Hard",
+    meta: "discard uncommitted changes (confirms)",
+    action: "reset-hard",
+  },
   {
     id: "lazygit",
     keyHint: "g",
@@ -118,6 +140,36 @@ export function GitMenu({
         }
         return;
       }
+      case "force-push": {
+        const ok = await confirm({
+          title: "Force-push to remote?",
+          message:
+            "git push --force-with-lease will overwrite the remote branch. Other contributors' commits may be discarded.",
+          danger: true,
+        });
+        if (!ok) return;
+        onClose();
+        onSystemMessage("Force-pushing (with lease)…");
+        const r = await gitPush(cwd, ["--force-with-lease"]);
+        onSystemMessage(r.ok ? "Force push complete." : `Force push failed: ${r.output}`);
+        onRefresh();
+        return;
+      }
+      case "reset-hard": {
+        const ok = await confirm({
+          title: "Reset working tree?",
+          message:
+            "git reset --hard HEAD will discard all uncommitted changes. Untracked files are kept.",
+          danger: true,
+        });
+        if (!ok) return;
+        onClose();
+        onSystemMessage("Resetting working tree…");
+        const r = await gitResetHard(cwd);
+        onSystemMessage(r.ok ? "Reset complete." : `Reset failed: ${r.output}`);
+        onRefresh();
+        return;
+      }
       case "lazygit": {
         onClose();
         try {
@@ -178,7 +230,7 @@ export function GitMenu({
       footerHints={[
         { key: "↑↓", label: "nav" },
         { key: "Enter", label: "run" },
-        { key: "c/p/u/s/o/l/g", label: "direct" },
+        { key: "c/p/u/s/o/l/g/f/r", label: "direct" },
         { key: "Esc", label: "close" },
       ]}
     >

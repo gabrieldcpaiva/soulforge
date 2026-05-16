@@ -15,6 +15,7 @@ import { type SessionListEntry, SessionManager } from "../../core/sessions/manag
 import { useTheme } from "../../core/theme/index.js";
 import { timeAgo } from "../../utils/time.js";
 import { Spinner } from "../layout/shared.js";
+import { confirm } from "../ui/dialogs/index.js";
 import {
   Hint,
   PremiumPopup,
@@ -194,12 +195,19 @@ export function SessionPicker({ visible, cwd, onClose, onRestore, onSystemMessag
     }
     if (evt.ctrl && evt.name === "d") {
       const s = filtered[cursorRef.current];
-      if (s) {
+      if (!s) return;
+      void (async () => {
+        const ok = await confirm({
+          title: "Delete session?",
+          message: `“${s.title}” — ${String(s.msgs)} messages, ${s.sizeLabel}. This cannot be undone.`,
+          danger: true,
+        });
+        if (!ok) return;
         manager.deleteSession(s.id);
         onSystemMessage(`Deleted session: ${s.title}`);
         popFlash("ok", `Deleted ${s.title}`);
         refresh();
-      }
+      })();
       return;
     }
     if (evt.ctrl && evt.name === "r") {
@@ -211,7 +219,19 @@ export function SessionPicker({ visible, cwd, onClose, onRestore, onSystemMessag
       return;
     }
     if (evt.ctrl && evt.name === "x") {
-      if (sessions.length > 0) setConfirmClear(true);
+      if (sessions.length === 0) return;
+      void (async () => {
+        const ok = await confirm({
+          title: "Clear all sessions?",
+          message: `${String(sessions.length)} sessions will be deleted from this project. This cannot be undone.`,
+          danger: true,
+        });
+        if (!ok) return;
+        const count = manager.clearAllSessions();
+        onSystemMessage(`Cleared ${count} session(s).`);
+        popFlash("ok", `Cleared ${count} sessions`);
+        refresh();
+      })();
       return;
     }
     if (evt.name === "backspace" || evt.name === "delete") {
