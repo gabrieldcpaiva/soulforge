@@ -38,6 +38,7 @@ import { extractMultiReadFiles, formatArgs } from "./tool-formatters.js";
 
 const ReasoningExpandedContext = createContext(false);
 export const ReasoningExpandedProvider = ReasoningExpandedContext.Provider;
+
 function useReasoningExpanded(): boolean {
   return useContext(ReasoningExpandedContext);
 }
@@ -46,19 +47,6 @@ const REVEAL_INTERVAL = 45;
 const MAX_REVEAL_STEPS = 8;
 const CURSOR_CHAR = "\u2588"; // █
 
-export const RAIL_BORDER = {
-  topLeft: "▌",
-  topRight: "▌",
-  bottomLeft: "▌",
-  bottomRight: "▌",
-  horizontal: "▌",
-  vertical: "▌",
-  topT: "▌",
-  bottomT: "▌",
-  leftT: "▌",
-  rightT: "▌",
-  cross: "▌",
-};
 interface Props {
   messages: ChatMessage[];
   chatStyle: ChatStyle;
@@ -261,6 +249,7 @@ function SystemMessage({ msg, animate = true }: { msg: ChatMessage; animate?: bo
   );
 }
 
+import { RAIL_BORDER } from "../ui/borders.js";
 import { EDIT_NAMES, groupToolCalls } from "./tool-grouping.js";
 
 function isFailedEditCall(tc: ToolCall): boolean {
@@ -1473,3 +1462,5 @@ export const MessageList = memo(function MessageList({
     </box>
   );
 });
+
+export { RAIL_BORDER } from "../ui/borders.js";
