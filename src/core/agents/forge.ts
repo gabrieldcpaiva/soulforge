@@ -97,6 +97,8 @@ function buildForgePrepareStep(
   /** When set, instructions are injected as the first user message instead of system prompt.
    *  Used for proxy+Claude where CLIProxyAPI cloaking replaces the system prompt. */
   proxyInstructions?: string,
+  /** Auto-mode lock-in nudge adapters. Read-only — model owns flips via set_lockin tool. */
+  lockInAdapters?: { getMode: () => "manual" | "auto"; getLockIn: () => boolean },
 ) {
   // Cache-stable inject tracking: the ToolLoopAgent discards prepareStep message
   // modifications after each step (it rebuilds from initialMessages + responseMessages).
@@ -112,6 +114,12 @@ function buildForgePrepareStep(
     pair: [ModelMessage, ModelMessage];
   }> = [];
   let lastUserTurnCount = 0;
+
+  // Lock-in auto-mode nudge tracking (per turn). Model owns flips — server never mutates lockIn.
+  let lockInToolCallsThisTurn = 0;
+  let lockInNudgedOnThisTurn = false;
+  let lockInNudgedOffThisTurn = false;
+  let lockInLastUserTurnCount = 0;
 
   // Proxy instructions message — injected once as the first user message so the proxy
   // cloaking doesn't strip it (it only replaces the system prompt, not user messages).
@@ -303,6 +311,39 @@ function buildForgePrepareStep(
     if (contextManager) {
       const crossTab = contextManager.buildCrossTabSection();
       if (crossTab) hints.push(crossTab);
+    }
+
+    // [7.6] Lock-in auto-mode nudges. Model owns flips via set_lockin tool —
+    // we only inject reminder hints, never mutate the boolean directly.
+    if (lockInAdapters) {
+      const utc = countUserTurns(sanitized);
+      if (utc > lockInLastUserTurnCount) {
+        lockInLastUserTurnCount = utc;
+        lockInToolCallsThisTurn = 0;
+        lockInNudgedOnThisTurn = false;
+        lockInNudgedOffThisTurn = false;
+      }
+      const prev = prevStep as { toolCalls?: Array<unknown>; finishReason?: string } | undefined;
+      if (prev?.toolCalls?.length) {
+        lockInToolCallsThisTurn += prev.toolCalls.length;
+      }
+      const mode = lockInAdapters.getMode();
+      const locked = lockInAdapters.getLockIn();
+      if (mode === "auto") {
+        if (!locked && lockInToolCallsThisTurn >= 2 && !lockInNudgedOnThisTurn) {
+          hints.push(
+            "You've used 2+ tools without locking in. Call set_lockin({on:true}) now to hide narration from the user.",
+          );
+          lockInNudgedOnThisTurn = true;
+        }
+        const lastHadNoTools = !prev?.toolCalls || prev.toolCalls.length === 0;
+        if (locked && lastHadNoTools && prev?.finishReason === "stop" && !lockInNudgedOffThisTurn) {
+          hints.push(
+            "You're done with tools. Call set_lockin({on:false}) before writing your final answer so the user sees it.",
+          );
+          lockInNudgedOffThisTurn = true;
+        }
+      }
     }
 
     // [7.5] Persona reinforcement — fights drift in long sessions.
@@ -580,6 +621,9 @@ interface ForgeAgentOptions {
   disabledTools?: Set<string>;
   tabId?: string;
   tabLabel?: string;
+  lockInMode?: "manual" | "auto";
+  getLockIn?: () => boolean;
+  setLockIn?: (v: boolean) => void;
 }
 
 /** Creates the main Forge ToolLoopAgent — model can change between turns (Ctrl+L). */
@@ -611,6 +655,9 @@ export function createForgeAgent({
   disabledTools,
   tabId,
   tabLabel,
+  lockInMode,
+  getLockIn,
+  setLockIn,
 }: ForgeAgentOptions) {
   const isRestricted = RESTRICTED_MODES.has(forgeMode);
   const repoMap = contextManager.isRepoMapReady() ? contextManager.getRepoMap() : undefined;
@@ -668,12 +715,17 @@ export function createForgeAgent({
     tabId: tabId ?? contextManager.getTabId() ?? undefined,
     tabLabel: tabLabel ?? contextManager.getTabLabel() ?? undefined,
     activeDeferredTools,
+    lockInMode,
+    getLockIn,
+    setLockIn,
   });
 
   // Reorder tools: soul tools → LSP → core. Models prefer tools earlier in the list,
   // and soul tools are TIER-1 (cheapest, most informative). This ordering reinforces
   // the decision flow in the system prompt without adding tokens.
   const STABLE_ORDER = [
+    // Lock-in control (auto mode only) — first so model sees it immediately
+    "set_lockin",
     // TIER-1: Soul tools (cheapest, graph-backed)
     "soul_grep",
     "soul_find",
@@ -909,6 +961,7 @@ export function createForgeAgent({
       canUseCodeExecution,
       parentMessagesRef,
       isProxyClaude ? buildInstructions(contextManager, modelId) : undefined,
+      lockInMode && getLockIn ? { getMode: () => lockInMode, getLockIn } : undefined,
     ),
     experimental_repairToolCall: repairToolCall,
     providerOptions: wrappedProviderOptions,

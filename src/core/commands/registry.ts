@@ -638,7 +638,7 @@ const COMMAND_DEFS: CommandDef[] = [
   {
     cmd: "/lock-in",
     ic: "ghost",
-    desc: "Toggle lock-in mode — hide narration, show tools + final answer",
+    desc: "Cycle lock-in mode — on / off / auto (model decides)",
     category: "Settings",
     tags: ["focus", "quiet", "narration", "shush"],
     suggested: true,

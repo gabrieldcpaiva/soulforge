@@ -1321,6 +1321,8 @@ export function App({
         setShowReasoning: uiState.setShowReasoning,
         lockIn: uiState.lockIn,
         setLockIn: uiState.setLockIn,
+        lockInMode: uiState.lockInMode,
+        setLockInMode: uiState.setLockInMode,
         watchdog: effectiveConfig.watchdog === true,
         openSetup: () => uiState.openModal("setup"),
         openEditorSettings: () => uiState.openModal("editorSettings"),

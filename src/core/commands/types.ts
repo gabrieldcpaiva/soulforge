@@ -47,6 +47,8 @@ export interface CommandContext {
   setShowReasoning: (v: boolean) => void;
   lockIn: boolean;
   setLockIn: (v: boolean) => void;
+  lockInMode: "manual" | "auto";
+  setLockInMode: (m: "manual" | "auto") => void;
   watchdog: boolean;
   openSetup: () => void;
   openEditorSettings: () => void;

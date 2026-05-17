@@ -361,6 +361,8 @@ export interface AppConfig {
   chatStyle?: ChatStyle;
   /** Lock-in mode — hide agent narration during work, show only tools + final answer. Default: false */
   lockIn?: boolean;
+  /** Lock-in control mode. "manual" = user toggles via /lock-in. "auto" = model flips via set_lockin tool. Default: "manual". */
+  lockInMode?: "manual" | "auto";
   /** Show reasoning/thinking content in chat. Default: true */
   showReasoning?: boolean;
   /** Add co-author trailer on AI-assisted commits. Default: true */

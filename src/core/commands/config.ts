@@ -463,15 +463,24 @@ function handleTimeouts(_input: string, ctx: CommandContext): void {
 }
 
 function handleLockIn(_input: string, ctx: CommandContext): void {
-  const next = !ctx.lockIn;
-  ctx.setLockIn(next);
-  ctx.saveToScope({ lockIn: next }, "project");
-  sysMsg(
-    ctx,
-    next
-      ? "🔒 Locked in — narration hidden, tools + final answer only"
-      : "🔓 Lock-in off — full narration visible",
-  );
+  // Cycle: manual-on → manual-off → auto → manual-on
+  const mode = ctx.lockInMode;
+  if (mode === "auto") {
+    ctx.setLockInMode("manual");
+    ctx.setLockIn(true);
+    ctx.saveToScope({ lockIn: true, lockInMode: "manual" }, "project");
+    sysMsg(ctx, "🔒 Locked in (manual) — narration hidden, tools + final answer only");
+    return;
+  }
+  if (ctx.lockIn) {
+    ctx.setLockIn(false);
+    ctx.saveToScope({ lockIn: false, lockInMode: "manual" }, "project");
+    sysMsg(ctx, "🔓 Lock-in off (manual) — full narration visible");
+    return;
+  }
+  ctx.setLockInMode("auto");
+  ctx.saveToScope({ lockInMode: "auto" }, "project");
+  sysMsg(ctx, "🤖 Lock-in auto — model decides via set_lockin tool");
 }
 
 function handleReasoning(_input: string, ctx: CommandContext): void {
@@ -798,7 +807,7 @@ function handleSettingsHub(_input: string, ctx: CommandContext): void {
   const chatStyle = ctx.chatStyle ?? "accent";
   const verbose = ctx.verbose ? "on" : "off";
   const reasoning = ctx.showReasoning ? "on" : "off";
-  const lockInStatus = ctx.lockIn ? "on" : "off";
+  const lockInStatus = ctx.lockInMode === "auto" ? "auto" : ctx.lockIn ? "on" : "off";
   const compaction = ctx.compactionStrategy ?? "v2";
   const diffStyle = ctx.diffStyle ?? "default";
   const nvimConfig = ctx.effectiveNvimConfig ?? "default";

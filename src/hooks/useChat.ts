@@ -66,6 +66,7 @@ import { recordModelCall } from "../stores/model-events.js";
 import { useRepoMapStore } from "../stores/repomap.js";
 import { accumulateModelUsage, useStatusBarStore, ZERO_USAGE } from "../stores/statusbar.js";
 import { useToolsStore } from "../stores/tools.js";
+import { useUIStore } from "../stores/ui.js";
 import type {
   AppConfig,
   ChatMessage,
@@ -2222,6 +2223,9 @@ export function useChat({
             disabledTools: useToolsStore.getState().disabledTools,
             tabId,
             tabLabel,
+            lockInMode: useUIStore.getState().lockInMode,
+            getLockIn: () => useUIStore.getState().lockIn,
+            setLockIn: (v) => useUIStore.getState().setLockIn(v),
           });
           let result: StreamTextResult<ToolSet, never> | undefined;
           for (let degradeLevel = 0; degradeLevel <= 2; degradeLevel++) {
@@ -2267,6 +2271,9 @@ export function useChat({
                         disabledTools: useToolsStore.getState().disabledTools,
                         tabId,
                         tabLabel,
+                        lockInMode: useUIStore.getState().lockInMode,
+                        getLockIn: () => useUIStore.getState().lockIn,
+                        setLockIn: (v) => useUIStore.getState().setLockIn(v),
                       });
                     })();
               result = (await currentAgent.stream({
