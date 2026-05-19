@@ -127,6 +127,7 @@ interface UIState {
   ensureTabVerboseDefault: (tabId: string, def?: boolean) => void;
   pruneTabVerbose: (tabId: string) => void;
   toggleMessageTool: (msgId: string, toolId: string) => void;
+  pruneMessageTools: (msgIds: string[]) => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -233,6 +234,19 @@ export const useUIStore = create<UIState>()(
             [msgId]: { ...cur, [toolId]: !cur[toolId] },
           },
         };
+      }),
+    pruneMessageTools: (msgIds) =>
+      set((s) => {
+        if (msgIds.length === 0) return {};
+        const next = { ...s.messageToolExpanded };
+        let changed = false;
+        for (const id of msgIds) {
+          if (id in next) {
+            delete next[id];
+            changed = true;
+          }
+        }
+        return changed ? { messageToolExpanded: next } : {};
       }),
     cycleEditorSplit: () =>
       set((s) => {

@@ -5,6 +5,7 @@ import { useTheme } from "../../core/theme/index.js";
 import { resolveToolDisplay, TOOL_LABELS_DONE } from "../../core/tool-display.js";
 import { garble } from "../../core/utils/splash.js";
 import { formatElapsed } from "../../hooks/useElapsed.js";
+import { useHover } from "../../hooks/useHover.js";
 import { Spinner } from "../layout/shared.js";
 import { DripText, type StreamSegment } from "./StreamSegmentList.js";
 import { type LiveToolCall, SUBAGENT_NAMES, ToolCallDisplay } from "./ToolCallDisplay.js";
@@ -21,7 +22,7 @@ export const LOCKIN_EDIT_TOOLS = new Set([
   "rename_symbol",
 ]);
 
-const QUIET_TOOLS = new Set(["update_plan_step", "ask_user", "task_list"]);
+const QUIET_TOOLS = new Set(["update_plan_step", "ask_user", "task_list", "set_lockin"]);
 
 const MAX_VISIBLE = 5;
 const ROTATE_INTERVAL = 8000;
@@ -176,11 +177,11 @@ export const LockInWrapper = memo(function LockInWrapper({
 
   const [showAllHidden, setShowAllHidden] = useState(false);
   const interactive = !!onToolClick;
-  const naturalHiddenCount = interactive ? 0 : Math.max(0, tools.length - MAX_VISIBLE);
+  const naturalHiddenCount = Math.max(0, tools.length - MAX_VISIBLE);
   const hiddenCount = showAllHidden ? 0 : naturalHiddenCount;
   const hidden = tools.slice(0, naturalHiddenCount);
   const hiddenEdits = hidden.filter((tc) => LOCKIN_EDIT_TOOLS.has(tc.name)).length;
-  const visible = interactive ? tools : showAllHidden ? tools : tools.slice(-MAX_VISIBLE);
+  const visible = showAllHidden ? tools : tools.slice(-MAX_VISIBLE);
 
   return (
     <box flexDirection="column" marginTop={hideStatusHeader ? 0 : 1}>
@@ -218,8 +219,7 @@ export const LockInWrapper = memo(function LockInWrapper({
           opacity={effectiveDone ? 0.6 : 1}
         >
           {hiddenCount > 0 ? (
-            // biome-ignore lint/a11y/noStaticElementInteractions: opentui box is the interactive primitive in TUI; a11y rule targets DOM
-            <box height={1} flexShrink={0} onMouseDown={() => setShowAllHidden(true)}>
+            <HoverableRow onClick={() => setShowAllHidden(true)} interactive>
               <text truncate>
                 <span fg={t.textDim}>
                   {icon("check")} +{String(hiddenCount)} completed
@@ -227,14 +227,13 @@ export const LockInWrapper = memo(function LockInWrapper({
                   <span fg={t.textFaint}> (click to expand)</span>
                 </span>
               </text>
-            </box>
+            </HoverableRow>
           ) : showAllHidden && naturalHiddenCount > 0 ? (
-            // biome-ignore lint/a11y/noStaticElementInteractions: opentui box is the interactive primitive in TUI; a11y rule targets DOM
-            <box height={1} flexShrink={0} onMouseDown={() => setShowAllHidden(false)}>
+            <HoverableRow onClick={() => setShowAllHidden(false)} interactive>
               <text truncate>
                 <span fg={t.textFaint}>collapse +{String(naturalHiddenCount)} above</span>
               </text>
-            </box>
+            </HoverableRow>
           ) : null}
           {visible.map((tc, i) => {
             const { icon: toolIcon, iconColor, label } = resolveToolDisplay(tc.name, t.textMuted);
@@ -245,32 +244,26 @@ export const LockInWrapper = memo(function LockInWrapper({
             const statusClr = tc.done ? (tc.error ? t.error : t.success) : t.brand;
             const isExpanded = !!toolExpanded?.[tc.id];
 
-            const row = (
-              <text truncate>
-                <span fg={t.textFaint}>{connector}</span>
-                {tc.done ? (
-                  <span fg={statusClr}>{tc.error ? "✗" : "✓"}</span>
-                ) : (
-                  <Spinner inline color={t.brand} />
-                )}
-                <span fg={tc.done ? t.textDim : iconColor}> {toolIcon} </span>
-                <span fg={tc.done ? t.textDim : t.brand}>{displayLabel}</span>
-                {tc.argStr ? (
-                  <span fg={tc.done ? t.textDim : t.textSecondary}> {tc.argStr}</span>
-                ) : null}
-              </text>
-            );
-
             return (
               <box key={tc.id} flexDirection="column" flexShrink={0}>
-                {interactive ? (
-                  // biome-ignore lint/a11y/noStaticElementInteractions: opentui box is the interactive primitive in TUI; a11y rule targets DOM
-                  <box height={1} onMouseDown={() => onToolClick?.(tc.id)}>
-                    {row}
-                  </box>
-                ) : (
-                  <box height={1}>{row}</box>
-                )}
+                <HoverableRow
+                  interactive={interactive}
+                  onClick={interactive ? () => onToolClick?.(tc.id) : undefined}
+                >
+                  <text truncate>
+                    <span fg={t.textFaint}>{connector}</span>
+                    {tc.done ? (
+                      <span fg={statusClr}>{tc.error ? "✗" : "✓"}</span>
+                    ) : (
+                      <Spinner inline color={t.brand} />
+                    )}
+                    <span fg={tc.done ? t.textDim : iconColor}> {toolIcon} </span>
+                    <span fg={tc.done ? t.textDim : t.brand}>{displayLabel}</span>
+                    {tc.argStr ? (
+                      <span fg={tc.done ? t.textDim : t.textSecondary}> {tc.argStr}</span>
+                    ) : null}
+                  </text>
+                </HoverableRow>
                 {interactive && isExpanded && toolDetails ? toolDetails(tc.id) : null}
               </box>
             );
@@ -429,3 +422,34 @@ export const LockInLiveAutoView = memo(function LockInLiveAutoView({
     </box>
   );
 });
+function HoverableRow({
+  children,
+  onClick,
+  interactive,
+}: {
+  children: ReactNode;
+  onClick?: () => void;
+  interactive?: boolean;
+}) {
+  const t = useTheme();
+  const [hovered, hoverHandlers] = useHover();
+  if (!interactive) {
+    return (
+      <box height={1} flexShrink={0}>
+        {children}
+      </box>
+    );
+  }
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: opentui box is the interactive primitive in TUI; a11y rule targets DOM
+    <box
+      height={1}
+      flexShrink={0}
+      backgroundColor={hovered ? t.bgElevated : undefined}
+      onMouseDown={onClick}
+      {...hoverHandlers}
+    >
+      {children}
+    </box>
+  );
+}

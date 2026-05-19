@@ -16,7 +16,7 @@ describe("langFromPath", () => {
 
   it("returns empty string for unknown extensions", () => {
     expect(langFromPath("file.xyz")).toBe("");
-    expect(langFromPath("file.md")).toBe("");
+    expect(langFromPath("file.unknownext")).toBe("");
   });
 
   it("handles hidden files (dot at position 0 of filename)", () => {
@@ -173,9 +173,9 @@ describe("computeDiff — edge cases", () => {
 describe("langFromPath — additional extensions", () => {
   it("handles .scss", () => expect(langFromPath("file.scss")).toBe("css"));
   it("handles .jsx", () => expect(langFromPath("file.jsx")).toBe("jsx"));
-  it("handles .mjs (unmapped)", () => expect(langFromPath("file.mjs")).toBe(""));
-  it("handles .cjs (unmapped)", () => expect(langFromPath("file.cjs")).toBe(""));
-  it("handles .mts (unmapped)", () => expect(langFromPath("file.mts")).toBe(""));
-  it("handles .yml (unmapped)", () => expect(langFromPath("file.yml")).toBe(""));
+  it("handles .mjs", () => expect(langFromPath("file.mjs")).toBe("js"));
+  it("handles .cjs", () => expect(langFromPath("file.cjs")).toBe("js"));
+  it("handles .mts", () => expect(langFromPath("file.mts")).toBe("ts"));
+  it("handles .yml", () => expect(langFromPath("file.yml")).toBe("yaml"));
   it("handles .sh", () => expect(langFromPath("file.sh")).toBe("bash"));
 });

@@ -134,7 +134,10 @@ export function useTabs(): UseTabsReturn {
       return next;
     });
     initialStates.current.delete(targetId);
+    const snap = chat?.snapshot ? chat.snapshot("close") : null;
+    const tabMessageIds = snap ? snap.messages.map((m) => m.id) : [];
     useUIStore.getState().pruneTabVerbose(targetId);
+    useUIStore.getState().pruneMessageTools(tabMessageIds);
 
     const newTabs = currentTabs.filter((t) => t.id !== targetId);
     setTabs(newTabs);

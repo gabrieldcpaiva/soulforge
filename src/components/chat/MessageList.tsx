@@ -263,6 +263,7 @@ function SystemMessage({ msg, animate = true }: { msg: ChatMessage; animate?: bo
 
 import { useHover } from "../../hooks/useHover.js";
 import { RAIL_BORDER } from "../ui/borders.js";
+import { HighlightedToolResult } from "./highlighted-result.js";
 import { EDIT_NAMES, groupToolCalls } from "./tool-grouping.js";
 
 function isFailedEditCall(tc: ToolCall): boolean {
@@ -918,6 +919,7 @@ function renderSegments(
     // Hide failed edits that were retried on the same file
     const calls = topLevel.filter((tc, idx) => {
       if (tc.name === "update_plan_step") return false;
+      if (tc.name === "set_lockin") return false;
       if (tc.name === "task_list" && !verbose) return false;
       if (!isFailedEditCall(tc)) return true;
       const path = extractPathFromArgs(tc.args);
@@ -1344,23 +1346,7 @@ const AssistantMessage = memo(function AssistantMessage({
                   const tc = toolCallMap.get(toolId);
                   if (!tc) return null;
                   const narration = autoLayout.narrationByTool.get(toolId);
-                  return (
-                    <box flexDirection="column" paddingLeft={2}>
-                      {narration?.before ? (
-                        <text fg={t.textFaint}>
-                          <span>before: </span>
-                          <span fg={t.textDim}>{narration.before}</span>
-                        </text>
-                      ) : null}
-                      <ToolCallRow tc={tc} diffStyle={diffStyle} collapseDiffs={collapseDiffs} />
-                      {narration?.after ? (
-                        <text fg={t.textFaint}>
-                          <span>after: </span>
-                          <span fg={t.textDim}>{narration.after}</span>
-                        </text>
-                      ) : null}
-                    </box>
-                  );
+                  return <ToolExpandedDetail tc={tc} narration={narration} diffStyle={diffStyle} />;
                 }}
               >
                 {autoRailDispatchCalls.length > 0
@@ -1406,7 +1392,10 @@ const AssistantMessage = memo(function AssistantMessage({
             <box flexDirection="column">
               {msg.toolCalls
                 ?.filter(
-                  (tc) => tc.name !== "update_plan_step" && (verbose || tc.name !== "task_list"),
+                  (tc) =>
+                    tc.name !== "update_plan_step" &&
+                    tc.name !== "set_lockin" &&
+                    (verbose || tc.name !== "task_list"),
                 )
                 .map((tc) => (
                   <box key={tc.id} flexDirection="column">
@@ -1571,3 +1560,81 @@ export const MessageList = memo(function MessageList({
 });
 
 export { RAIL_BORDER } from "../ui/borders.js";
+
+function ToolExpandedDetail({
+  tc,
+  narration,
+  diffStyle,
+}: {
+  tc: ToolCall;
+  narration?: { before?: string; after?: string };
+  diffStyle?: "default" | "sidebyside" | "compact";
+}) {
+  const t = useTheme();
+  const props = buildFinalToolRowProps(tc);
+  const effectiveDiffStyle = diffStyle ?? "default";
+  const fullResult = tc.result?.output ?? tc.result?.error ?? "";
+  const hasDiff = !!props.diff;
+  const hasImage = !!(props.imageArt && props.imageArt.length > 0);
+  const showResultText = !hasDiff && !hasImage && fullResult.length > 0;
+  const isError = !!tc.result && !tc.result.success;
+  return (
+    <box flexDirection="column" paddingLeft={2} marginTop={1} marginBottom={1}>
+      {narration?.before ? (
+        <box paddingLeft={1} marginBottom={1}>
+          <text fg={t.textFaint} truncate>
+            <span>{icon("comment")} </span>
+            <span fg={t.textDim}>{narration.before}</span>
+          </text>
+        </box>
+      ) : null}
+      <box
+        flexDirection="column"
+        border={["left"]}
+        borderColor={isError ? t.error : t.textFaint}
+        paddingLeft={1}
+      >
+        {hasDiff && props.diff ? (
+          <box flexDirection="column">
+            <DiffView
+              filePath={props.diff.path}
+              oldString={props.diff.oldString}
+              newString={props.diff.newString}
+              success={props.diff.success}
+              errorMessage={props.diff.errorMessage}
+              mode={effectiveDiffStyle}
+            />
+            {props.diff.impact ? (
+              <text fg={t.textMuted}>
+                {"  "}
+                <span fg={t.amber}>{getIcon("impact")}</span>
+                <span fg={t.textSecondary}> {props.diff.impact}</span>
+              </text>
+            ) : null}
+          </box>
+        ) : null}
+        {hasImage && props.imageArt
+          ? props.imageArt.map((img) => (
+              <box key={img.name} flexDirection="column">
+                <ImageDisplay img={img} />
+              </box>
+            ))
+          : null}
+        {showResultText ? (
+          <HighlightedToolResult tc={tc} fullResult={fullResult} isError={isError} />
+        ) : null}
+      </box>
+      {narration?.after ? (
+        <box paddingLeft={1} marginTop={1}>
+          <text fg={t.textFaint} truncate>
+            <span>{icon("comment")} </span>
+            <span fg={t.textDim}>{narration.after}</span>
+          </text>
+        </box>
+      ) : null}
+    </box>
+  );
+}
+// HighlightedToolResult lives in ./highlighted-result.tsx so the parsing rules
+// (read line-number strip, multi-file split, large-body gate) are shared across
+// any surface that wants to render a tool result with syntax highlighting.

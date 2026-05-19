@@ -338,15 +338,12 @@ function buildForgePrepareStep(
         }
       }
 
-      if (
-        !lockInCommittedThisTurn &&
-        !lastHadTools &&
-        prev?.finishReason === "stop" &&
-        lockInToolCallsThisTurn >= 1 &&
-        !lockInNudgedOffThisTurn
-      ) {
+      // Fire once per turn the moment we've made 2+ tool calls without committing.
+      // Doesn't require the previous step to be tool-less — models that batch text
+      // with the last tool call (e.g. Claude) would otherwise never see the nudge.
+      if (!lockInCommittedThisTurn && !lockInNudgedOffThisTurn && lockInToolCallsThisTurn >= 2) {
         hints.push(
-          "About to write the final answer. Call set_lockin({on:false}) first so prior tool work collapses into the rail and your text streams visibly.",
+          "Multiple tool calls this turn without a commit boundary. Call set_lockin({on:false}) as your LAST tool before your final answer so prior tool work collapses into the rail and your text streams visibly.",
         );
         lockInNudgedOffThisTurn = true;
       }
