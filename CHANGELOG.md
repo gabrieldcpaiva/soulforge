@@ -2,6 +2,32 @@
 
 All notable changes to SoulForge are documented here.
 
+## [2.16.3] — 2026-05-20
+
+### Bug Fixes
+
+- **chat**: preserve chronological order in tools rail
+- **chat**: drop inline <think> parser — reasoning only from native stream parts
+- **compaction**: allow user-configured per-model context window override
+- **memory**: annotate buildMemoryIndex locals with MemoryIndex type
+- **memory**: survive concurrent sf SQLite I/O errors
+### Documentation
+
+- **changelog**: add sponsors shoutout to 2.16.2
+- **prompts**: rewrite commit-boundary rule to clarify set_lockin timing
+### Features
+
+- **presets**: load shareable config bundles by name, URL, or path
+### Miscellaneous
+
+- update readme
+- update readme
+- update readme
+- update readme
+### Refactor
+
+- **prompts**: positive framing + naturalize memory
+- **prompts**: per-family tuning + tighter answer voice
 ## [2.16.2] — 2026-05-20
 
 ### 💜 Sponsors
