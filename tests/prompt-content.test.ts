@@ -38,9 +38,9 @@ describe("shared-identity content", () => {
   test("enforces the tool loop contract", () => {
     expect(SHARED_IDENTITY).toContain("<tool_loop>");
     expect(SHARED_IDENTITY).toContain("<answer_voice>");
-    // <forbidden_between_tool_calls> bullet list folded inline into <tool_loop>
-    expect(SHARED_IDENTITY).toContain("Acknowledgements");
-    expect(SHARED_IDENTITY).toContain("self-narration");
+    // Positive-framed: between tool calls is zero text, no narration of results.
+    expect(SHARED_IDENTITY).toContain("Between tool calls: zero text");
+    expect(SHARED_IDENTITY).toContain("never narrate the result back");
   });
 
   test("collapsed four overlapping sections into two", () => {
@@ -52,13 +52,13 @@ describe("shared-identity content", () => {
   });
 
   test("exposes CORE_RULES single-source micro-prompt", () => {
-    expect(CORE_RULES).toContain("Silent tool loop");
+    expect(CORE_RULES).toContain("Tool loop is silent");
     expect(CORE_RULES).toContain("Speak once, at the end");
   });
 
   test("warns that interstitial text does not render to the user", () => {
     expect(CORE_RULES).toContain("Interstitial text does not render");
-    expect(SHARED_IDENTITY).toContain("Interstitial text does not render");
+    expect(SHARED_IDENTITY).toContain("interstitial text does not render");
   });
 });
 

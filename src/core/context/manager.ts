@@ -12,6 +12,7 @@ import { setIntelligenceClient } from "../intelligence/instance.js";
 import type { SymbolForSummary } from "../intelligence/repo-map.js";
 import { resolveModel } from "../llm/provider.js";
 import { EPHEMERAL_CACHE, supportsTemperature } from "../llm/provider-options.js";
+import { setMemoryHintProvider } from "../memory/hints.js";
 import { MemoryManager } from "../memory/manager.js";
 import { MemoryRecall } from "../memory/recall.js";
 import { describeRecallSignals, MEMORY_RECALL_ACK } from "../memory/types.js";
@@ -112,6 +113,8 @@ export class ContextManager {
   constructor(cwd: string, shared?: SharedContextResources) {
     this.cwd = cwd;
     if (shared) {
+      setMemoryHintProvider(shared.memoryManager);
+
       this.repoMap = shared.repoMap;
       this.memoryManager = shared.memoryManager;
       this.memoryRecall = shared.memoryRecall ?? this.createMemoryRecall();
@@ -121,6 +124,7 @@ export class ContextManager {
     } else {
       this.memoryManager = new MemoryManager(cwd);
       this.memoryManager.noteSessionStart();
+      setMemoryHintProvider(this.memoryManager);
       this.repoMap = new IntelligenceClient(cwd);
       this.memoryRecall = this.createMemoryRecall();
       setIntelligenceClient(this.repoMap);

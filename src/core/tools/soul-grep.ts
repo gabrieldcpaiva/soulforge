@@ -210,7 +210,6 @@ function runCount(bin: string, args: string[]): Promise<ToolResult> {
       if (entries.length > 25) {
         lines.push(`  ... and ${String(entries.length - 25)} more files`);
       }
-
       resolve({ success: true, output: lines.join("\n") });
     });
 

@@ -5,10 +5,16 @@ import type { ToolResult } from "../../types";
 import { readBufferContent } from "../editor/instance";
 import { getIntelligenceClient } from "../intelligence/index.js";
 import type { SymbolKind } from "../intelligence/types.js";
+import { memoryHintForPaths } from "../memory/hints.js";
 import { isForbidden } from "../security/forbidden.js";
 import { getIOClient, type ReadFileResult } from "../workers/io-client.js";
 import { binaryHint } from "./binary-detect.js";
 import { emitFileRead } from "./file-events.js";
+
+function toRelPath(abs: string): string {
+  const cwd = process.cwd();
+  return abs.startsWith(`${cwd}/`) ? abs.slice(cwd.length + 1) : abs;
+}
 
 type ReadTarget = string;
 
@@ -123,6 +129,8 @@ async function readViaWorker(filePath: string, args: ReadFileArgs): Promise<Tool
   const lineCount = result.numbered.split("\n").length;
   const isRangeRead = args.startLine != null || args.endLine != null;
 
+  const tail = memoryHintForPaths([toRelPath(filePath)]);
+
   if (!isRangeRead && lineCount > SMART_TRUNCATE_LINES) {
     const cutoffLine = result.start + SMART_TRUNCATE_LINES;
     const outline = await buildSymbolOutline(filePath, cutoffLine, result.totalLines);
@@ -130,7 +138,7 @@ async function readViaWorker(filePath: string, args: ReadFileArgs): Promise<Tool
       const truncatedLines = result.numbered.split("\n").slice(0, SMART_TRUNCATE_LINES);
       return {
         success: true,
-        output: `${truncatedLines.join("\n")}${outline}`,
+        output: `${truncatedLines.join("\n")}${outline}${tail}`,
       };
     }
   }
@@ -148,7 +156,7 @@ async function readViaWorker(filePath: string, args: ReadFileArgs): Promise<Tool
       outline ||
       `\n... ${String(remaining)} more lines. Use ranges:[{start:${String(nextOffset)}, end:N}] to continue.`;
   }
-  return { success: true, output };
+  return { success: true, output: `${output}${tail}` };
 }
 
 /** Main-thread fallback — used for symbol reads and when worker is unavailable. */
@@ -223,6 +231,7 @@ async function readOnMainThread(filePath: string, args: ReadFileArgs): Promise<T
   if (truncated) {
     output += `\n\n(File has ${String(totalLines)} lines. Showing first ${String(MAX_READ_LINES)}. Use ranges:[{start:${String(start + MAX_READ_LINES)}, end:N}] to continue.)`;
   }
+  output += memoryHintForPaths([toRelPath(filePath)]);
 
   return { success: true, output };
 }
