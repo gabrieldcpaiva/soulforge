@@ -2,6 +2,15 @@
 
 All notable changes to SoulForge are documented here.
 
+## [2.16.2] — 2026-05-20
+
+### Bug Fixes
+
+- **lockin**: invalidate commit when tools land after set_lockin
+- **read-highlight**: render unknown-lang files plain in multi-file reads
+### Documentation
+
+- **sponsors**: add BACKERS.md + README sponsor wall with LLM Gateway
 ## [2.16.1] — 2026-05-20
 
 ### Features
