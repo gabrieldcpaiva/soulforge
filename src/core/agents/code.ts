@@ -3,7 +3,12 @@ import type { LanguageModel } from "ai";
 import { ToolLoopAgent } from "ai";
 import { loadConfig } from "../../config/index.js";
 import { logBackgroundError } from "../../stores/errors.js";
-import { EPHEMERAL_CACHE, getModelId, supportsTemperature } from "../llm/provider-options.js";
+import {
+  type CacheTTL,
+  getEphemeralCache,
+  getModelId,
+  supportsTemperature,
+} from "../llm/provider-options.js";
 import { CORE_RULES } from "../prompts/families/shared-rules.js";
 import { resolveRetrySettings } from "../retry/settings.js";
 import { buildSubagentCodeTools, wrapWithBusCache } from "../tools/index.js";
@@ -96,7 +101,10 @@ export function createCodeAgent(model: LanguageModel, options?: CodeAgentOptions
     tabId: options?.tabId,
   });
 
-  const { maxTransientRetries: retryMaxRetries } = resolveRetrySettings(loadConfig().retry, {
+  const cfg = loadConfig();
+  const cacheTtl: CacheTTL = cfg.cache?.ttl ?? "5m";
+  const cacheOpts = getEphemeralCache(cacheTtl);
+  const { maxTransientRetries: retryMaxRetries } = resolveRetrySettings(cfg.retry, {
     agent: true,
   });
 
@@ -126,7 +134,7 @@ export function createCodeAgent(model: LanguageModel, options?: CodeAgentOptions
             if (!hasBus || options?.skipBusTools) return base;
             return `${base}\nOwnership: you own files you edit first. check_edit_conflicts before touching another agent's file.\nIf another agent owns the file: report_finding with the exact edit instead.\nCoordination: report_finding after significant changes (paths, what changed, new exports). Peer findings appear in tool results.`;
           })(),
-      providerOptions: EPHEMERAL_CACHE,
+      providerOptions: cacheOpts,
     },
     stopWhen: stopConditions,
     prepareStep,
@@ -138,7 +146,7 @@ export function createCodeAgent(model: LanguageModel, options?: CodeAgentOptions
           string,
           unknown
         >) ?? {}),
-        cacheControl: { type: "ephemeral" },
+        cacheControl: { type: "ephemeral", ttl: cacheTtl },
         // See forge.ts: gateways strip SDK-level maxOutputTokens; mirror to wire.
         max_tokens: MAX_OUTPUT_TOKENS,
       },

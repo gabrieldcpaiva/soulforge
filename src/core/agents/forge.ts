@@ -15,9 +15,11 @@ import type {
 import { compressImageForApi } from "../../utils/image-compress.js";
 import type { ContextManager } from "../context/manager.js";
 import {
+  type CacheTTL,
   detectModelFamily,
   EPHEMERAL_CACHE,
   getAnthropicToolVersions,
+  getEphemeralCache,
   getModelId,
   isAnthropicNative,
   supportsTemperature,
@@ -104,6 +106,7 @@ function buildForgePrepareStep(
   /** When set, instructions are injected as the first user message instead of system prompt.
    *  Used for proxy+Claude where CLIProxyAPI cloaking replaces the system prompt. */
   proxyInstructions?: string,
+  cacheOpts: ProviderOptions = EPHEMERAL_CACHE,
 ) {
   // Cache-stable inject tracking: the ToolLoopAgent discards prepareStep message
   // modifications after each step (it rebuilds from initialMessages + responseMessages).
@@ -120,11 +123,7 @@ function buildForgePrepareStep(
   }> = [];
   let lastUserTurnCount = 0;
 
-  // Commit-boundary nudge tracking (per turn).
-  let lockInToolCallsThisTurn = 0;
-  let lockInNudgedOffThisTurn = false;
-  let lockInLastUserTurnCount = 0;
-  let lockInCommittedThisTurn = false;
+  // Commit-boundary nudge: recomputed fresh every step from message history (no closure state).
 
   // Proxy instructions message — injected once as the first user message so the proxy
   // cloaking doesn't strip it (it only replaces the system prompt, not user messages).
@@ -137,7 +136,7 @@ function buildForgePrepareStep(
             text: `<system-instructions>\n${proxyInstructions}\n</system-instructions>`,
           },
         ],
-        providerOptions: EPHEMERAL_CACHE,
+        providerOptions: cacheOpts,
       } as ModelMessage)
     : null;
 
@@ -242,12 +241,12 @@ function buildForgePrepareStep(
                   {
                     role: "user" as const,
                     content: pair[0].content,
-                    providerOptions: EPHEMERAL_CACHE,
+                    providerOptions: cacheOpts,
                   } as ModelMessage,
                   {
                     role: "assistant" as const,
                     content: pair[1].content,
-                    providerOptions: EPHEMERAL_CACHE,
+                    providerOptions: cacheOpts,
                   } as ModelMessage,
                 ],
               });
@@ -328,38 +327,34 @@ function buildForgePrepareStep(
     // [7.6] Commit-boundary reminder. Tool work renders as a collapsed rail;
     // set_lockin({on:false}) marks the boundary so the final answer streams visibly.
     // Server never inspects or mutates display state — the renderer reads the call directly.
+    //
+    // Recompute fresh every step from the full message history of THIS user turn —
+    // catches parallel tool blocks in a single step (which prev.toolCalls misses
+    // when text + tools share one assistant message). Re-fires every step the
+    // constraint is violated — no latch.
     {
-      const utc = countUserTurns(sanitized);
-      if (utc > lockInLastUserTurnCount) {
-        lockInLastUserTurnCount = utc;
-        lockInToolCallsThisTurn = 0;
-        lockInNudgedOffThisTurn = false;
-        lockInCommittedThisTurn = false;
-      }
-      const prev = prevStep as
-        | {
-            toolCalls?: Array<{ toolName?: string; input?: { on?: boolean } }>;
-            finishReason?: string;
-          }
-        | undefined;
-      const lastHadTools = !!prev?.toolCalls?.length;
-      if (lastHadTools) {
-        lockInToolCallsThisTurn += prev.toolCalls?.length ?? 0;
-        for (const tc of prev.toolCalls ?? []) {
-          if (tc.toolName === "set_lockin" && tc.input?.on === false) {
-            lockInCommittedThisTurn = true;
+      // Walk back to the most recent user message; tally tool calls + lockin commit after it.
+      let toolCallsThisTurn = 0;
+      let committedThisTurn = false;
+      for (let i = sanitized.length - 1; i >= 0; i--) {
+        const m = sanitized[i];
+        if (!m) continue;
+        if (m.role === "user") break;
+        if (m.role !== "assistant" || !Array.isArray(m.content)) continue;
+        for (const part of m.content) {
+          if (typeof part !== "object" || part === null || !("type" in part)) continue;
+          const p = part as { type: string; toolName?: string; input?: { on?: boolean } };
+          if (p.type !== "tool-call") continue;
+          toolCallsThisTurn++;
+          if (p.toolName === "set_lockin" && p.input?.on === false) {
+            committedThisTurn = true;
           }
         }
       }
-
-      // Fire once per turn the moment we've made 2+ tool calls without committing.
-      // Doesn't require the previous step to be tool-less — models that batch text
-      // with the last tool call (e.g. Claude) would otherwise never see the nudge.
-      if (!lockInCommittedThisTurn && !lockInNudgedOffThisTurn && lockInToolCallsThisTurn >= 2) {
+      if (!committedThisTurn && toolCallsThisTurn >= 2) {
         hints.push(
           "Multiple tool calls this turn without a commit boundary. Call set_lockin({on:false}) as your LAST tool before your final answer so prior tool work collapses into the rail and your text streams visibly.",
         );
-        lockInNudgedOffThisTurn = true;
       }
     }
 
@@ -913,12 +908,15 @@ export function createForgeAgent({
     return names.length < allToolNames.length ? names : undefined;
   };
 
+  const cacheTtl: CacheTTL = loadConfig().cache?.ttl ?? "5m";
+  const cacheOpts = getEphemeralCache(cacheTtl);
+
   const wrappedProviderOptions = {
     ...providerOptions,
     anthropic: {
       ...(((providerOptions as Record<string, unknown>)?.anthropic as Record<string, unknown>) ??
         {}),
-      cacheControl: { type: "ephemeral" },
+      cacheControl: { type: "ephemeral", ttl: cacheTtl },
       // Mirror SDK-level maxOutputTokens onto the Anthropic request body so gateways/proxies
       // that strip non-native fields still see a real cap. Without this, llmgateway and
       // similar OpenAI-compatible proxies fall back to Anthropic's 1024-token default,
@@ -949,7 +947,7 @@ export function createForgeAgent({
       : {
           role: "system" as const,
           content: buildInstructions(contextManager, modelId),
-          providerOptions: EPHEMERAL_CACHE,
+          providerOptions: cacheOpts,
         },
     callOptionsSchema: z.object({
       userMessage: z.string().nullable(),
@@ -969,6 +967,7 @@ export function createForgeAgent({
       canUseCodeExecution,
       parentMessagesRef,
       isProxyClaude ? buildInstructions(contextManager, modelId) : undefined,
+      cacheOpts,
     ),
     experimental_repairToolCall: repairToolCall,
     providerOptions: wrappedProviderOptions,

@@ -594,18 +594,39 @@ function buildContextEdits(
 // so caching works regardless of which provider routes to Anthropic/Claude.
 // The Vercel AI SDK silently ignores keys that don't match the active provider.
 
-const CACHE_EPHEMERAL = { cacheControl: { type: "ephemeral" } } as const;
+export type CacheTTL = "5m" | "1h";
 
-export const EPHEMERAL_CACHE: ProviderOptions = {
-  anthropic: CACHE_EPHEMERAL,
-  google: CACHE_EPHEMERAL,
-  proxy: CACHE_EPHEMERAL,
-  llmgateway: CACHE_EPHEMERAL,
-  opencode_zen: CACHE_EPHEMERAL,
-  opencode_go: CACHE_EPHEMERAL,
-  openrouter: CACHE_EPHEMERAL,
-  vercel_gateway: CACHE_EPHEMERAL,
-} as ProviderOptions;
+const CACHE_EPHEMERAL_5M = {
+  cacheControl: { type: "ephemeral" as const, ttl: "5m" as const },
+} as const;
+const CACHE_EPHEMERAL_1H = {
+  cacheControl: { type: "ephemeral" as const, ttl: "1h" as const },
+} as const;
+
+function buildCacheProviderOptions(ttl: CacheTTL): ProviderOptions {
+  const cache = ttl === "1h" ? CACHE_EPHEMERAL_1H : CACHE_EPHEMERAL_5M;
+  return {
+    anthropic: cache,
+    google: cache,
+    proxy: cache,
+    llmgateway: cache,
+    opencode_zen: cache,
+    opencode_go: cache,
+    openrouter: cache,
+    vercel_gateway: cache,
+  } as ProviderOptions;
+}
+
+const EPHEMERAL_CACHE_5M = buildCacheProviderOptions("5m");
+const EPHEMERAL_CACHE_1H = buildCacheProviderOptions("1h");
+
+/** Resolve cache ProviderOptions for a given TTL. Memoized — same reference per TTL. */
+export function getEphemeralCache(ttl: CacheTTL = "5m"): ProviderOptions {
+  return ttl === "1h" ? EPHEMERAL_CACHE_1H : EPHEMERAL_CACHE_5M;
+}
+
+/** Back-compat default (5m). New code should call getEphemeralCache(config.cache?.ttl). */
+export const EPHEMERAL_CACHE: ProviderOptions = EPHEMERAL_CACHE_5M;
 
 export interface ProviderOptionsResult {
   providerOptions: ProviderOptions;

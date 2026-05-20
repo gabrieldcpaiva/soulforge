@@ -2201,10 +2201,15 @@ export function useChat({
 
           setLoadingStartedAt(Date.now());
 
-          // Anthropic ephemeral cache dies after 5min idle. Throw away
+          // Anthropic ephemeral cache dies after its TTL idle. Throw away
           // accumulated soul-map diff blocks at that point — they cost
           // tokens with zero cache benefit once the prefix is dead.
-          contextManager.maybeReseedExpiredCache();
+          // 5m TTL → 270s window (30s safety). 1h TTL → 3540s window (60s safety).
+          {
+            const cacheTtl = effectiveConfig.cache?.ttl ?? "5m";
+            const idleMs = cacheTtl === "1h" ? 3_540_000 : 270_000;
+            contextManager.maybeReseedExpiredCache(idleMs);
+          }
 
           const agent = createForgeAgent({
             model,

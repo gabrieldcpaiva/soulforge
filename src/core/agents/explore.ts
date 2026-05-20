@@ -3,7 +3,12 @@ import type { LanguageModel } from "ai";
 import { ToolLoopAgent } from "ai";
 import { loadConfig } from "../../config/index.js";
 import { logBackgroundError } from "../../stores/errors.js";
-import { EPHEMERAL_CACHE, getModelId, supportsTemperature } from "../llm/provider-options.js";
+import {
+  type CacheTTL,
+  getEphemeralCache,
+  getModelId,
+  supportsTemperature,
+} from "../llm/provider-options.js";
 import { CORE_RULES } from "../prompts/families/shared-rules.js";
 import { resolveRetrySettings } from "../retry/settings.js";
 import { buildEmberExploreTools, wrapWithBusCache } from "../tools/index.js";
@@ -106,7 +111,10 @@ export function createExploreAgent(model: LanguageModel, options?: ExploreAgentO
     tabId: options?.tabId,
   });
 
-  const { maxTransientRetries: retryMaxRetries } = resolveRetrySettings(loadConfig().retry, {
+  const cfg = loadConfig();
+  const cacheTtl: CacheTTL = cfg.cache?.ttl ?? "5m";
+  const cacheOpts = getEphemeralCache(cacheTtl);
+  const { maxTransientRetries: retryMaxRetries } = resolveRetrySettings(cfg.retry, {
     agent: true,
   });
 
@@ -136,7 +144,7 @@ export function createExploreAgent(model: LanguageModel, options?: ExploreAgentO
             if (!hasBus || options?.skipBusTools) return base;
             return `${base}\nCoordination: report_finding after discoveries — especially shared symbols/configs with peer targets. check_findings for peer detail.`;
           })(),
-      providerOptions: EPHEMERAL_CACHE,
+      providerOptions: cacheOpts,
     },
     stopWhen: stopConditions,
     prepareStep,
@@ -148,7 +156,7 @@ export function createExploreAgent(model: LanguageModel, options?: ExploreAgentO
           string,
           unknown
         >) ?? {}),
-        cacheControl: { type: "ephemeral" },
+        cacheControl: { type: "ephemeral", ttl: cacheTtl },
         // See forge.ts: gateways strip SDK-level maxOutputTokens; mirror to wire.
         max_tokens: MAX_OUTPUT_TOKENS,
       },

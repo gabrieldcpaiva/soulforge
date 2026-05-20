@@ -134,6 +134,14 @@ const CLAUDE_ITEMS: SettingItem[] = [
     desc: "Drop old tool results at 65% ctx. Busts prompt cache when it fires",
     type: "toggle",
   },
+  { type: "section", label: "Cache" },
+  {
+    key: "cacheTtl",
+    label: "Cache TTL",
+    desc: "5m = free · 1h = ~2× cache-write cost, 12× lifetime (long agentic runs)",
+    type: "cycle",
+    options: ["5m", "1h"],
+  },
 ];
 
 const OPENAI_ITEMS: SettingItem[] = [
@@ -358,6 +366,7 @@ interface CurrentValues {
   openaiReasoningSummary: string;
   openaiVerbosity: string;
   groqReasoningFormat: string;
+  cacheTtl: string;
 }
 
 const DEFAULTS: CurrentValues = {
@@ -391,6 +400,7 @@ const DEFAULTS: CurrentValues = {
   openaiReasoningSummary: "off",
   openaiVerbosity: "off",
   groqReasoningFormat: "off",
+  cacheTtl: "5m",
 };
 
 function readValuesFromLayer(layer: Partial<AppConfig> | null): Partial<CurrentValues> {
@@ -448,6 +458,7 @@ function readValuesFromLayer(layer: Partial<AppConfig> | null): Partial<CurrentV
     v.pruning = layer.contextManagement.pruningTarget;
   else if (layer.contextManagement?.disablePruning !== undefined)
     v.pruning = layer.contextManagement.disablePruning ? "none" : "subagents";
+  if (layer.cache?.ttl !== undefined) v.cacheTtl = layer.cache.ttl;
   return v;
 }
 
@@ -525,6 +536,8 @@ function buildPatch(key: string, value: string | number | boolean): Partial<AppC
       return {
         contextManagement: { pruningTarget: value as string } as ContextManagementConfig,
       };
+    case "cacheTtl":
+      return { cache: { ttl: value as "5m" | "1h" } };
     default:
       return {};
   }

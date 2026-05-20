@@ -403,6 +403,11 @@ export interface AppConfig {
   retry?: RetryConfig;
   /** Memory subsystem config. embeddingModel: AI SDK model id (e.g. "openai/text-embedding-3-small"). null/undefined falls back to hashbag-v2. */
   memory?: { embeddingModel?: string | null };
+  /** Anthropic prompt cache settings. Always global. */
+  cache?: {
+    /** Ephemeral cache TTL. "5m" (free, default) or "1h" (paid: ~2× cache-write cost, 12× lifetime). */
+    ttl?: "5m" | "1h";
+  };
 }
 
 export interface RetryConfig {
