@@ -2024,7 +2024,13 @@ export function useChat({
             : undefined;
           const webSearchModel = webSearchModelId ? resolveModel(webSearchModelId) : undefined;
           webSearchModelLabelRef.current = webSearchModelId
-            ? getShortModelLabel(webSearchModelId)
+            ? (() => {
+                const id = webSearchModelId;
+                const slash = id.indexOf("/");
+                const providerId = slash > 0 ? id.slice(0, slash) : "";
+                const short = getShortModelLabel(id);
+                return providerId ? `${providerId}/${short}` : short;
+              })()
             : null;
 
           // Web access: when disabled, null out both approval AND model so the tool is inert

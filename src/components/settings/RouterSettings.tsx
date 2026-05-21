@@ -62,11 +62,9 @@ const SECTIONS: SectionDef[] = [
     ],
   },
   {
-    id: "dispatch",
-    title: "Dispatch",
+    id: "tools",
+    title: "Tools",
     defs: [
-      { kind: "slot", key: "spark", label: "Explore", icon: "read_only", hint: "Read-only agents" },
-      { kind: "slot", key: "ember", label: "Code", icon: "edit", hint: "Edit agents" },
       {
         kind: "slot",
         key: "webSearch",
@@ -74,6 +72,14 @@ const SECTIONS: SectionDef[] = [
         icon: "web",
         hint: "Web search & fetch",
       },
+    ],
+  },
+  {
+    id: "dispatch",
+    title: "Dispatch",
+    defs: [
+      { kind: "slot", key: "spark", label: "Explore", icon: "read_only", hint: "Read-only agents" },
+      { kind: "slot", key: "ember", label: "Code", icon: "edit", hint: "Edit agents" },
       {
         kind: "picker",
         key: "maxConcurrentAgents",
@@ -354,7 +360,7 @@ export function RouterSettings({
               // Fallback rows reuse the slot layout: short model on left,
               // chain (or em-dash) on the right where the model col sits.
               const fallbackLabelCol = Math.min(28, Math.max(18, Math.floor(contentW * 0.32)));
-              const label = truncate(shortModel(row.modelId), fallbackLabelCol)
+              const label = truncate(row.modelId, fallbackLabelCol)
                 .padEnd(fallbackLabelCol)
                 .slice(0, fallbackLabelCol);
               return (
@@ -379,7 +385,7 @@ export function RouterSettings({
                   {fbs.length > 0 ? (
                     <text bg={rowBg} fg={t.brandAlt} attributes={BOLD}>
                       {truncate(
-                        `→ ${fbs.map((m) => shortModel(m)).join(", ")}`,
+                        `→ ${fbs.join(", ")}`,
                         Math.max(8, contentW - 4 - fallbackLabelCol - 2),
                       )}
                     </text>
@@ -433,7 +439,7 @@ export function RouterSettings({
                 <box flexGrow={1} backgroundColor={rowBg} />
                 {modelId ? (
                   <text bg={rowBg} fg={t.brandAlt} attributes={BOLD}>
-                    {truncate(shortModel(modelId), modelCol)}
+                    {truncate(modelId, modelCol)}
                   </text>
                 ) : (
                   <text bg={rowBg} fg={t.textDim}>

@@ -1587,7 +1587,16 @@ export function App({
 
       <LlmSelector
         visible={modalLlmSelector}
-        activeModel={activeModelForHeader}
+        activeModel={(() => {
+          const slot = routerSlotPicking;
+          const fb = useUIStore.getState().fallbackForModel;
+          if (slot) {
+            const v = effectiveConfig.taskRouter?.[slot];
+            if (typeof v === "string" && v.trim()) return v;
+          }
+          if (fb) return fb;
+          return activeModelForHeader;
+        })()}
         onSelect={(modelId) => {
           const slot = useUIStore.getState().routerSlotPicking;
           const fallbackForModel = useUIStore.getState().fallbackForModel;
