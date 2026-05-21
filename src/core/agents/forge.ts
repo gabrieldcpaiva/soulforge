@@ -92,7 +92,7 @@ function buildForgePrepareStep(
   drainSteering?: () => { text: string; images?: ImageAttachment[] } | null,
   contextManager?: {
     buildCrossTabSection(): string | null;
-    buildSoulMapDiff(): string | null;
+    buildSoulMapDiff(modelId?: string): string | null;
     hasSoulMapDiff?(): boolean;
     commitSoulMapDiff(): void;
     buildSkillsBlock(): string | null;
@@ -107,12 +107,20 @@ function buildForgePrepareStep(
    *  Used for proxy+Claude where CLIProxyAPI cloaking replaces the system prompt. */
   proxyInstructions?: string,
   cacheOpts: ProviderOptions = EPHEMERAL_CACHE,
+  modelId?: string,
 ) {
   // Cache-stable inject tracking: the ToolLoopAgent discards prepareStep message
   // modifications after each step (it rebuilds from initialMessages + responseMessages).
   // To maintain prefix stability for Anthropic prompt caching, we re-insert previous
   // injects at their original positions so the API always sees an append-only history.
-  const previousInjects: Array<{ cleanInsertAt: number; message: ModelMessage }> = [];
+  const previousInjects: Array<{
+    cleanInsertAt: number;
+    message: ModelMessage;
+    /** Snapshot epoch when this inject was built. Soul-map-update injects with
+     *  stale epochs are dropped on refresh so the model never sees deltas the
+     *  fresh snapshot already contains. Non-soul-map injects use epoch=null. */
+    soulMapEpoch?: number | null;
+  }> = [];
 
   // Memory recall injects — same re-insert pattern, but spliced BEFORE the latest
   // user turn (not appended at the tail) so the agent reads the recall block in
@@ -216,7 +224,7 @@ function buildForgePrepareStep(
     let soulMapDiff: string | null = null;
 
     if (contextManager?.hasSoulMapDiff?.()) {
-      soulMapDiff = contextManager.buildSoulMapDiff();
+      soulMapDiff = contextManager.buildSoulMapDiff(modelId);
     }
 
     // ── Memory recall injection ──────────────────────────────────────
@@ -588,7 +596,7 @@ function buildInstructions(cm: ContextManager, modelId: string): string {
   const cached = instructionsCache.get(cm);
   if (cached && cached.key === key) return cached.text;
   const parts = [cm.buildSystemPrompt(modelId)];
-  const snapshot = cm.buildSoulMapSnapshot(false);
+  const snapshot = cm.buildSoulMapSnapshot({ modelId });
   if (snapshot) parts.push(snapshot);
   const skills = cm.buildSkillsBlock();
   if (skills) parts.push(skills);
@@ -967,6 +975,7 @@ export function createForgeAgent({
       parentMessagesRef,
       isProxyClaude ? buildInstructions(contextManager, modelId) : undefined,
       cacheOpts,
+      modelId,
     ),
     experimental_repairToolCall: repairToolCall,
     providerOptions: wrappedProviderOptions,

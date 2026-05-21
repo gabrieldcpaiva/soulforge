@@ -21,7 +21,7 @@ async function handleExportAll(ctx: CommandContext): Promise<void> {
   const forgeMode = ctx.chat.forgeMode;
   const repoMapReady = ctx.contextManager.isRepoMapReady();
 
-  const soulMapBlock = ctx.contextManager.buildSoulMapSnapshot(false);
+  const soulMapBlock = ctx.contextManager.buildSoulMapSnapshot();
   const skillsMessages = ctx.contextManager.buildSkillsMessages();
 
   const payload = {

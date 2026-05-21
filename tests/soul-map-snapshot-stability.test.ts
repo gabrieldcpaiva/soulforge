@@ -1,149 +1,84 @@
 import { describe, expect, test } from "bun:test";
+import { SoulMapSnapshot } from "../src/core/context/soul-map-snapshot.js";
+import { cacheTtlToMs, supportsPromptCache } from "../src/core/llm/cache-support.js";
+import { hash32Hex } from "../src/core/utils/hash.js";
 
-// Wave 1 invariant: a frozen soul-map snapshot returns byte-identical content
-// for its entire TTL window, regardless of file-change activity in between.
-// Mutations land in the delta channel — never in the snapshot.
+describe("SoulMapSnapshot — idle TTL", () => {
+  test("read returns frozen content and bumps lastAccessedAt", () => {
+    const snap = new SoulMapSnapshot(
+      { content: "v1", paths: new Set(), ttlMs: 60_000 },
+      1_000,
+    );
+    expect(snap.read(2_000)).toBe("v1");
+    expect(snap.lastAccessedAt).toBe(2_000);
+    expect(snap.read(50_000)).toBe("v1");
+    expect(snap.lastAccessedAt).toBe(50_000);
+  });
 
-interface FrozenSnapshot {
-  content: string;
-  at: number;
-  hash: string;
-}
-
-function fnv1a(s: string): string {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return (h >>> 0).toString(16).padStart(8, "0");
-}
-
-function createSnapshotHarness(opts: { ttlMs: number; deltaBudget: number }) {
-  let snapshot: FrozenSnapshot | null = null;
-  const deltas: string[] = [];
-  let pendingDeltaBytes = 0;
-  let renderedContent = "initial render";
-  let now = 0;
-
-  return {
-    setNow(t: number) {
-      now = t;
-    },
-    setRenderedContent(c: string) {
-      renderedContent = c;
-    },
-    pushDelta(text: string) {
-      deltas.push(text);
-      pendingDeltaBytes += text.length;
-    },
-    getSnapshot(forceRefresh = false): string {
-      const ttlExpired = !snapshot || now - snapshot.at >= opts.ttlMs;
-      const budgetExceeded = pendingDeltaBytes > opts.deltaBudget;
-      const shouldRefresh = forceRefresh || ttlExpired || budgetExceeded;
-      if (!shouldRefresh && snapshot) return snapshot.content;
-      snapshot = { content: renderedContent, at: now, hash: fnv1a(renderedContent) };
-      deltas.length = 0;
-      pendingDeltaBytes = 0;
-      return snapshot.content;
-    },
-    snapshotHash() {
-      return snapshot?.hash ?? null;
-    },
-    deltaCount() {
-      return deltas.length;
-    },
-    deltaBytes() {
-      return pendingDeltaBytes;
-    },
-  };
-}
-
-describe("Wave 1 — soul map snapshot stability", () => {
-  test("snapshot bytes identical across 100 file changes within TTL", () => {
-    const h = createSnapshotHarness({ ttlMs: 600_000, deltaBudget: 16_000 });
-    h.setNow(0);
-    const first = h.getSnapshot();
-    const firstHash = h.snapshotHash();
-
-    // Simulate 100 file changes — each pushes a small delta, never refreshes.
-    for (let i = 0; i < 100; i++) {
-      h.setNow(i * 1000); // 100s of activity
-      h.pushDelta(`file-${String(i)}.ts:`);
+  test("continuous use stays hot past birth-time TTL", () => {
+    const snap = new SoulMapSnapshot({ content: "x", paths: new Set(), ttlMs: 60_000 }, 0);
+    // Read every 30s for an hour — birth at 0, last access at 3_600_000.
+    for (let t = 30_000; t <= 3_600_000; t += 30_000) {
+      snap.read(t);
+      expect(snap.isIdleExpired(t)).toBe(false);
     }
-
-    const last = h.getSnapshot();
-    expect(last).toBe(first);
-    expect(h.snapshotHash()).toBe(firstHash);
-    expect(h.deltaCount()).toBe(100);
   });
 
-  test("snapshot refreshes after TTL expiry, deltas drop", () => {
-    const h = createSnapshotHarness({ ttlMs: 60_000, deltaBudget: 16_000 });
-    h.setNow(0);
-    h.setRenderedContent("snapshot v1");
-    const v1 = h.getSnapshot();
-    expect(v1).toBe("snapshot v1");
-
-    h.pushDelta("modified");
-    expect(h.deltaCount()).toBe(1);
-
-    // Cross TTL boundary
-    h.setNow(60_001);
-    h.setRenderedContent("snapshot v2");
-    const v2 = h.getSnapshot();
-    expect(v2).toBe("snapshot v2");
-    expect(h.deltaCount()).toBe(0); // deltas folded into new snapshot
+  test("idle past TTL marks expired", () => {
+    const snap = new SoulMapSnapshot({ content: "x", paths: new Set(), ttlMs: 60_000 }, 0);
+    snap.read(10_000);
+    expect(snap.isIdleExpired(60_000)).toBe(false);
+    expect(snap.isIdleExpired(70_001)).toBe(true);
   });
 
-  test("delta budget overflow forces snapshot refresh before TTL", () => {
-    const h = createSnapshotHarness({ ttlMs: 600_000, deltaBudget: 100 });
-    h.setNow(0);
-    h.setRenderedContent("snapshot v1");
-    h.getSnapshot();
+  test("hash is deterministic and stable for same content", () => {
+    const a = new SoulMapSnapshot({ content: "hello world", paths: new Set(), ttlMs: 0 });
+    const b = new SoulMapSnapshot({ content: "hello world", paths: new Set(), ttlMs: 0 });
+    expect(a.hash).toBe(b.hash);
+    expect(a.hash).toBe(hash32Hex("hello world"));
+  });
+});
 
-    // Push deltas totalling more than budget
-    h.pushDelta("a".repeat(50));
-    h.pushDelta("b".repeat(60)); // total 110, > 100
-    expect(h.deltaBytes()).toBeGreaterThan(100);
-
-    h.setRenderedContent("snapshot v2");
-    const refreshed = h.getSnapshot();
-    expect(refreshed).toBe("snapshot v2");
-    expect(h.deltaCount()).toBe(0);
+describe("supportsPromptCache — model family gating", () => {
+  test("claude family (direct + gateways + kimi)", () => {
+    for (const id of [
+      "anthropic/claude-sonnet-4-6",
+      "proxy/claude-opus-4-5",
+      "llmgateway/claude-sonnet-4",
+      "openrouter/anthropic/claude-3.5-sonnet",
+      "moonshot/kimi-k2",
+      "openrouter/moonshotai/kimi-k2",
+    ]) {
+      const s = supportsPromptCache(id);
+      expect(s.enabled).toBe(true);
+      expect(s.explicit).toBe(true);
+    }
   });
 
-  test("explicit refresh always rebuilds, even before TTL", () => {
-    const h = createSnapshotHarness({ ttlMs: 600_000, deltaBudget: 16_000 });
-    h.setNow(0);
-    h.setRenderedContent("snapshot v1");
-    const v1 = h.getSnapshot();
-    const h1 = h.snapshotHash();
-
-    h.setRenderedContent("snapshot v2");
-    const v2 = h.getSnapshot(true);
-    expect(v2).toBe("snapshot v2");
-    expect(v2).not.toBe(v1);
-    expect(h.snapshotHash()).not.toBe(h1);
+  test("implicit caches (openai, gemini, deepseek, xai)", () => {
+    for (const id of [
+      "openai/gpt-5.4",
+      "openai/o3",
+      "google/gemini-2.5-pro",
+      "deepseek/deepseek-chat",
+      "xai/grok-4",
+      "openrouter/google/gemini-2.5-flash",
+    ]) {
+      const s = supportsPromptCache(id);
+      expect(s.enabled).toBe(true);
+      expect(s.explicit).toBe(false);
+    }
   });
 
-  test("snapshot hash is deterministic across runs for same content", () => {
-    const a = fnv1a("hello world");
-    const b = fnv1a("hello world");
-    expect(a).toBe(b);
-    expect(a).toBe("d58b3fa7");
+  test("unknown providers fall back to no-cache", () => {
+    expect(supportsPromptCache("groq/llama-3-70b").enabled).toBe(false);
+    expect(supportsPromptCache("custom/unknown-model").enabled).toBe(false);
   });
+});
 
-  test("byte-stable ordering: sort by recency DESC then path ASC for ties", () => {
-    const entries: Array<[string, number]> = [
-      ["c.ts", 5],
-      ["a.ts", 5],
-      ["b.ts", 3],
-    ];
-    const sorted = entries.sort((x, y) => {
-      const recency = y[1] - x[1];
-      return recency !== 0 ? recency : x[0].localeCompare(y[0]);
-    });
-    expect(sorted.map(([p]) => p)).toEqual(["a.ts", "c.ts", "b.ts"]);
+describe("cacheTtlToMs", () => {
+  test("maps 5m and 1h", () => {
+    expect(cacheTtlToMs("5m")).toBe(5 * 60_000);
+    expect(cacheTtlToMs("1h")).toBe(60 * 60_000);
   });
 });

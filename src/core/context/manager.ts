@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { generateText } from "ai";
+import { loadConfig } from "../../config/index.js";
 import { logBackgroundError } from "../../stores/errors.js";
 import { recordModelCall } from "../../stores/model-events.js";
 import { useRepoMapStore } from "../../stores/repomap.js";
@@ -10,6 +11,7 @@ import { toErrorMessage } from "../../utils/errors.js";
 import { setNeovimFileWrittenHandler } from "../editor/neovim.js";
 import { setIntelligenceClient } from "../intelligence/instance.js";
 import type { SymbolForSummary } from "../intelligence/repo-map.js";
+import { cacheTtlToMs, supportsPromptCache } from "../llm/cache-support.js";
 import { resolveModel } from "../llm/provider.js";
 import { EPHEMERAL_CACHE, supportsTemperature } from "../llm/provider-options.js";
 import { resetSurfacedHints, setMemoryHintProvider } from "../memory/hints.js";
@@ -29,6 +31,7 @@ import { emitFileEdited, onFileEdited, onFileRead } from "../tools/file-events.j
 import { IntelligenceClient } from "../workers/intelligence-client.js";
 // extractConversationTerms removed — FTS boosting was noisy
 import { walkDir } from "./file-tree.js";
+import { SoulMapSnapshot } from "./soul-map-snapshot.js";
 import { detectToolchain } from "./toolchain.js";
 
 // System prompt assembly is handled by src/core/prompts/builder.ts
@@ -92,16 +95,11 @@ export class ContextManager {
   /** Pre-rendered diff blocks for changed files. Eagerly populated in onFileChanged via getFileDiffBlock. */
   private soulMapDiffBlocks = new Map<string, { radiusTag: string; symbolBlock: string }>();
   /**
-   * Frozen soul-map snapshot — immutable bytes for the lifetime of a TTL window.
-   * Mutations land in soulMapDiffChangedFiles as appended deltas, never modify the snapshot.
-   * Refreshed on: TTL expiry, compaction, /clear, session restore, delta budget overflow.
+   * Frozen soul-map snapshot for this tab. Byte-stable across reads until
+   * idle-expired, compacted, or explicitly reset. Mutations land in the delta
+   * channel — never modify the snapshot. Null = needs rebuild on next request.
    */
-  private soulMapSnapshot: {
-    content: string;
-    at: number;
-    hash: string;
-    paths: Set<string>;
-  } | null = null;
+  private soulMapSnapshot: SoulMapSnapshot | null = null;
   private taskRouter: TaskRouter | undefined;
   private semanticSummaryLimit = 500;
   private semanticAutoRegen = false;
@@ -114,10 +112,6 @@ export class ContextManager {
   private projectInstructions = "";
   private projectInstructionsVersion = 0;
   private static readonly REPO_MAP_TTL = 5_000; // 5s — covers getContextBreakdown + buildSystemPrompt in same prompt
-  /** Snapshot lifetime — soul-map content frozen for this long. Refresh only via TTL expiry, compaction, or explicit reset. */
-  private static readonly SOUL_MAP_SNAPSHOT_TTL = 10 * 60_000; // 10 min
-  /** Hard cap on accumulated soul-map-update bytes before forcing a snapshot refresh. */
-  private static readonly SOUL_MAP_DELTA_MAX_BYTES = 16_000;
 
   private static readonly FILE_TREE_TTL = 30_000; // 30s
   private static readonly PROJECT_INFO_TTL = 300_000; // 5min
@@ -1324,59 +1318,90 @@ export class ContextManager {
   }
 
   /**
-   * Build (or reuse) the frozen soul-map snapshot. The snapshot is byte-stable
-   * for SOUL_MAP_SNAPSHOT_TTL — same bytes returned every call until expiry,
-   * compaction, or explicit reset. Mutations land in the delta channel instead.
+   * Build or reuse the soul-map snapshot for the given model.
    *
-   * @param clearDiffTracker — when true (default), forces a fresh snapshot AND
-   *   clears accumulated deltas. Used at session start and on explicit refresh.
-   *   When false, returns the cached snapshot if still within TTL.
+   * Providers that support prompt caching (Claude direct + all gateways routing
+   * to Claude, OpenAI, Gemini, DeepSeek, xAI implicit caches) get a frozen
+   * snapshot with idle-TTL semantics — same bytes on every read until idle past
+   * `config.cache.ttl` (5m or 1h).
+   *
+   * Providers without prompt caching (Groq legacy, unknown gateways) render
+   * fresh every call: no cache to preserve means stale data has no upside.
+   * `buildSoulMapDiff()` returns null in this case so we never inject deltas
+   * that duplicate content already in the fresh snapshot.
+   *
+   * @param opts.modelId — active model; gates the freeze + delta channel.
+   * @param opts.force — bypass freeze on this call (session start, /clear, refresh).
    */
-  buildSoulMapSnapshot(clearDiffTracker = true): string | null {
+  buildSoulMapSnapshot(
+    opts: { modelId?: string; force?: boolean } | boolean = false,
+  ): string | null {
+    // Legacy boolean signature: `true` = force fresh, `false` = reuse if possible.
+    const { modelId, force } =
+      typeof opts === "boolean" ? { modelId: undefined, force: opts } : opts;
     if (!this.isRepoMapReady()) return null;
 
+    const cacheSupport = modelId
+      ? supportsPromptCache(modelId)
+      : { enabled: true, explicit: false };
+    const ttlMs = cacheTtlToMs(loadConfig().cache?.ttl ?? "5m");
     const now = Date.now();
-    const ttlExpired =
-      !this.soulMapSnapshot ||
-      now - this.soulMapSnapshot.at >= ContextManager.SOUL_MAP_SNAPSHOT_TTL;
-    const shouldRefresh = clearDiffTracker || ttlExpired;
 
-    if (!shouldRefresh && this.soulMapSnapshot) {
-      return this.soulMapSnapshot.content;
+    // Provider has no cache to preserve → live render, no freeze, no deltas.
+    if (!cacheSupport.enabled) {
+      const rendered = this.renderSnapshotContent();
+      if (rendered) {
+        this.soulMapSnapshot = new SoulMapSnapshot(
+          { content: rendered, paths: new Set(this.soulMapSnapshotPaths), ttlMs: 0 },
+          now,
+        );
+        this.clearDeltaState();
+      }
+      return rendered;
     }
 
+    const expired = !this.soulMapSnapshot || this.soulMapSnapshot.isIdleExpired(now);
+    if (!force && !expired && this.soulMapSnapshot) {
+      return this.soulMapSnapshot.read(now);
+    }
+
+    const rendered = this.renderSnapshotContent();
+    if (!rendered) return null;
+
+    this.soulMapSnapshot = new SoulMapSnapshot(
+      { content: rendered, paths: new Set(this.soulMapSnapshotPaths), ttlMs },
+      now,
+    );
+    this.clearDeltaState();
+    return rendered;
+  }
+
+  private renderSnapshotContent(): string | null {
     const rendered = this.renderRepoMap();
     if (!rendered) return null;
     const isMinimal = this.contextWindowTokens <= 32_000;
     const treeLimit = this.repoMapTokenBudget ? Math.ceil(this.repoMapTokenBudget / 100) : 60;
     const dirTree = buildDirectoryTree(this.cwd, treeLimit);
-    const content = buildSoulMapContent(rendered, isMinimal, dirTree);
+    return buildSoulMapContent(rendered, isMinimal, dirTree);
+  }
 
-    // Stamp the snapshot. paths come from the underlying render() — the diff
-    // channel uses them to distinguish [NEW FILE] tags from modifications.
-    this.soulMapSnapshot = {
-      content,
-      at: now,
-      hash: hashString(content),
-      paths: new Set(this.soulMapSnapshotPaths),
-    };
-
-    // Refresh always drops accumulated deltas — they're folded into the new snapshot.
+  private clearDeltaState(): void {
     this.soulMapDiffChangedFiles.clear();
     this.soulMapDiffSeq = 0;
     this.soulMapDiffBlocks.clear();
     this.pendingSoulMapDiff = null;
     this.lastEmittedSoulMapDiff = null;
-
-    return content;
   }
 
   private pendingSoulMapDiff: string | null = null;
   /** The diff string that was last emitted — used to detect changes and avoid re-emitting identical diffs. */
   private lastEmittedSoulMapDiff: string | null = null;
 
-  buildSoulMapDiff(): string | null {
+  buildSoulMapDiff(modelId?: string): string | null {
     if (!this.isRepoMapReady()) return null;
+
+    // Non-caching providers always see a live snapshot; deltas would duplicate.
+    if (modelId && !supportsPromptCache(modelId).enabled) return null;
 
     // Purge any stale entries outside cwd (e.g. /tmp scripts tracked before guard)
     for (const path of this.soulMapDiffChangedFiles.keys()) {
@@ -1404,13 +1429,16 @@ export class ContextManager {
         const absPath = join(this.cwd, file);
         const fileExists = existsSync(absPath);
         const block = this.soulMapDiffBlocks.get(file);
+        const provenance = this.classifyDeltaFile(absPath, file);
 
         if (!fileExists) {
           // Deleted file
-          lines.push(`- ${file}`);
+          lines.push(`- ${file} [deleted]`);
         } else if (hasSnapshot && !this.soulMapSnapshotPaths.has(file)) {
           // New file — not in the frozen snapshot
-          const tag = block ? `${file}:${block.radiusTag} [NEW FILE]` : `${file}: [NEW FILE]`;
+          const tag = block
+            ? `${file}:${block.radiusTag} [new] ${provenance}`.trimEnd()
+            : `${file}: [new] ${provenance}`.trimEnd();
           lines.push(tag);
           if (block?.symbolBlock && richBlockCount < MAX_RICH_BLOCKS) {
             lines.push(block.symbolBlock);
@@ -1418,7 +1446,9 @@ export class ContextManager {
           }
         } else {
           // Modified file — include blast radius + symbols if prefetched
-          const tag = block ? `${file}:${block.radiusTag}` : `${file}:`;
+          const tag = block
+            ? `${file}:${block.radiusTag} ${provenance}`.trimEnd()
+            : `${file}: ${provenance}`.trimEnd();
           lines.push(tag);
           if (block?.symbolBlock && richBlockCount < MAX_RICH_BLOCKS) {
             lines.push(block.symbolBlock);
@@ -1437,21 +1467,20 @@ export class ContextManager {
   }
 
   /**
-   * Returns true when accumulated deltas have grown past the byte budget OR
-   * when the snapshot has aged past its TTL. Callers (forge prepareStep,
-   * compaction) use this to force a fresh snapshot before the delta channel
-   * becomes a worse signal than a rebuild.
+   * Classify a delta file with provenance tags so Forge can prioritize.
+   * Returns an empty string when no provenance applies (avoids visual noise).
    */
-  needsSnapshotRefresh(): boolean {
-    if (!this.soulMapSnapshot) return true;
-    if (Date.now() - this.soulMapSnapshot.at >= ContextManager.SOUL_MAP_SNAPSHOT_TTL) return true;
-    const deltaBytes = this.pendingSoulMapDiff?.length ?? 0;
-    return deltaBytes > ContextManager.SOUL_MAP_DELTA_MAX_BYTES;
+  private classifyDeltaFile(absPath: string, _rel: string): string {
+    const tags: string[] = [];
+    if (this.editedFiles.has(absPath)) tags.push("[edited]");
+    if (this.mentionedFiles.has(absPath)) tags.push("[mentioned]");
+    if (this.editorFile === absPath) tags.push("[open]");
+    return tags.join(" ");
   }
 
-  /** Telemetry: hash of the current frozen snapshot, or null if none. */
-  getSoulMapSnapshotHash(): string | null {
-    return this.soulMapSnapshot?.hash ?? null;
+  /** Drop the cached snapshot so the next call rebuilds. */
+  forceSnapshotRefresh(): void {
+    this.soulMapSnapshot = null;
   }
 
   commitSoulMapDiff(): void {
@@ -1732,13 +1761,3 @@ export class ContextManager {
 }
 
 export { extractConversationTerms } from "./conversation-terms.js";
-
-function hashString(s: string): string {
-  // FNV-1a 32-bit — fast, deterministic, sufficient for cache-hit telemetry
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return (h >>> 0).toString(16).padStart(8, "0");
-}

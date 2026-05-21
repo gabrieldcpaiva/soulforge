@@ -142,15 +142,8 @@ function charNgrams(text: string, n: number): string[] {
   return out;
 }
 
-/** FNV-1a 32-bit. Fast, deterministic, good distribution for short strings. */
-function hashToken(token: string): number {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < token.length; i++) {
-    h ^= token.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return h >>> 0;
-}
+// FNV-1a 32-bit shared with snapshot/cache layers via utils/hash.
+import { hash32 as hashToken } from "../utils/hash.js";
 
 function project(vec: Float32Array, token: string, weight: number, dim: number): void {
   const h = hashToken(token);
