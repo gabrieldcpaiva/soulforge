@@ -19,7 +19,7 @@ import type {
   MemorySource,
 } from "./types.js";
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 interface RawMemoryRow {
   id: string;
@@ -257,6 +257,24 @@ export class MemoryDB {
           CREATE INDEX IF NOT EXISTS idx_memory_edges_dst ON memory_edges(dst_id);
           CREATE INDEX IF NOT EXISTS idx_memory_edges_kind ON memory_edges(kind);
         `);
+      }
+
+      if (current < 3) {
+        // v3: hint telemetry — surface_count / surface_acted_count.
+        // ALTER ADD COLUMN with DEFAULT 0 is non-breaking: old code ignores
+        // the new columns, new code reads 0 on rows written by old versions.
+        const cols = this.db
+          .query<{ name: string }, []>("PRAGMA table_info(memories)")
+          .all()
+          .map((r) => r.name);
+        if (!cols.includes("surface_count")) {
+          this.db.run("ALTER TABLE memories ADD COLUMN surface_count INTEGER NOT NULL DEFAULT 0");
+        }
+        if (!cols.includes("surface_acted_count")) {
+          this.db.run(
+            "ALTER TABLE memories ADD COLUMN surface_acted_count INTEGER NOT NULL DEFAULT 0",
+          );
+        }
       }
 
       if (current < SCHEMA_VERSION) {
@@ -1227,6 +1245,25 @@ export class MemoryDB {
       category: (r.category as MemoryCategory | null) ?? null,
       hasPathMatch: pathIds.has(r.id),
     }));
+  }
+
+  /**
+   * Hint telemetry — increment surface_count, plus surface_acted_count when
+   * the agent followed up with memory(get|search|list) on the surfaced id.
+   * Best-effort; swallows errors.
+   */
+  recordSurface(id: string, acted: boolean): void {
+    try {
+      if (acted) {
+        this.db
+          .query(
+            "UPDATE memories SET surface_count = surface_count + 1, surface_acted_count = surface_acted_count + 1 WHERE id = ?",
+          )
+          .run(id);
+      } else {
+        this.db.query("UPDATE memories SET surface_count = surface_count + 1 WHERE id = ?").run(id);
+      }
+    } catch {}
   }
 }
 

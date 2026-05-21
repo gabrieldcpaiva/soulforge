@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { markMemoryAction } from "../memory/hints.js";
+import { markMemoryAction, recordMemoryAction } from "../memory/hints.js";
 import type { MemoryManager } from "../memory/manager.js";
 import { MemoryRecall } from "../memory/recall.js";
 import type { MemoryCategory, MemoryRecord, MemoryScope } from "../memory/types.js";
@@ -310,6 +310,9 @@ export function createMemoryTool(deps: MemoryManager | CreateMemoryToolDeps) {
             error: "ambiguous_id",
           };
         }
+        try {
+          recordMemoryAction(resolved.id);
+        } catch {}
         return { success: true, output: formatRecordFull(resolved) };
       }
 

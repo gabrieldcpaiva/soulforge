@@ -82,6 +82,21 @@ export function markMemoryAction(): void {
   _agentActedThisTurn = true;
 }
 
+/**
+ * Record that the agent acted on a specific memory id this session — bumps
+ * surface_acted_count so we can demote chronically-ignored hints later.
+ * Called from memory(get) handler with the resolved id.
+ */
+export function recordMemoryAction(id: string): void {
+  if (!_manager) return;
+  try {
+    _manager.getDbForScope("project").recordSurface(id, true);
+    _manager.getDbForScope("global").recordSurface(id, true);
+  } catch (err) {
+    reportHintError("record-action", err);
+  }
+}
+
 /** Snapshot IDs surfaced so far — for passing to subagents. */
 export function getSurfacedHintIds(): string[] {
   const s = _scope.getStore();
@@ -247,6 +262,13 @@ function buildHintLine(top: TopCandidate | null, total: number, ctx: HintContext
   surfaced.add(top.id);
   if (!inSubagentScope()) _surfacedRecently.set(top.id, _turnCounter);
   bumpBudget();
+  // Telemetry — surface_count++. Acted is recorded later by recordMemoryAction.
+  if (_manager) {
+    try {
+      _manager.getDbForScope("project").recordSurface(top.id, false);
+      _manager.getDbForScope("global").recordSurface(top.id, false);
+    } catch {}
+  }
 
   const id8 = top.id.slice(0, 8);
   const summary = truncateSummary(top.summary);

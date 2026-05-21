@@ -46,7 +46,7 @@ function adapt(db: MemoryDB) {
 
 // ─── 1. db.ts ────────────────────────────────────────────────────────────
 
-describe("MemoryDB — schema migration v1 → v2", () => {
+describe("MemoryDB — schema migration v1 → v3", () => {
   let dir: string;
   beforeEach(() => {
     dir = makeTmpDir("migrate");
@@ -55,7 +55,7 @@ describe("MemoryDB — schema migration v1 → v2", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("opens a v1 DB, adds embedding columns + memory_edges, preserves rows", () => {
+  it("opens a v1 DB, adds embedding columns + memory_edges + surface telemetry, preserves rows", () => {
     const dbPath = join(dir, "v1.db");
     // Hand-roll a v1 schema (Phase 1, pre-Phase-4): no embedding columns,
     // no memory_edges table. Includes the same FTS triggers v1 had.
@@ -125,6 +125,8 @@ describe("MemoryDB — schema migration v1 → v2", () => {
       expect(cols).toContain("embedding");
       expect(cols).toContain("embedding_model");
       expect(cols).toContain("embedding_dim");
+      expect(cols).toContain("surface_count");
+      expect(cols).toContain("surface_acted_count");
 
       // Edges table exists
       const edgesTable = (db as unknown as { db: Database }).db
@@ -138,7 +140,37 @@ describe("MemoryDB — schema migration v1 → v2", () => {
       const v = (db as unknown as { db: Database }).db
         .query<{ version: number }, []>("SELECT MAX(version) as version FROM schema_version")
         .get();
-      expect(v?.version).toBe(2);
+      expect(v?.version).toBe(3);
+
+      // Legacy row has 0 for telemetry columns (default), not null
+      const tel = (db as unknown as { db: Database }).db
+        .query<{ s: number; a: number }, []>(
+          "SELECT surface_count as s, surface_acted_count as a FROM memories WHERE id='legacy-1'",
+        )
+        .get();
+      expect(tel?.s).toBe(0);
+      expect(tel?.a).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("recordSurface increments surface_count, optionally surface_acted_count", () => {
+    const db = new MemoryDB(":memory:", "project");
+    try {
+      const r = db.write({ summary: "telemetry-row", details: "", category: null, source: "agent" });
+      const read = (): { s: number; a: number } | null =>
+        (db as unknown as { db: Database }).db
+          .query<{ s: number; a: number }, [string]>(
+            "SELECT surface_count as s, surface_acted_count as a FROM memories WHERE id = ?",
+          )
+          .get(r.record.id);
+      expect(read()).toEqual({ s: 0, a: 0 });
+      db.recordSurface(r.record.id, false);
+      expect(read()).toEqual({ s: 1, a: 0 });
+      db.recordSurface(r.record.id, true);
+      expect(read()).toEqual({ s: 2, a: 1 });
+      db.recordSurface("unknown-id", true); // silent no-op
     } finally {
       db.close();
     }
