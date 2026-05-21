@@ -60,6 +60,29 @@ export class SessionManager {
     tabMessages: Map<string, ChatMessage[]>,
     tabCoreMessages?: Map<string, import("ai").ModelMessage[]>,
   ): Promise<void> {
+    // Serialize saves for the same session — concurrent saves race on the
+    // two-file rename (meta.json + messages.jsonl) and can interleave such that
+    // meta's messageRange offsets point into a different save's messages.jsonl.
+    // Symptom: tab N's content gets sliced from tab M's range → restored tabs
+    // show wrong (often duplicated) content, and the last assistant message
+    // can disappear when an earlier-issued save finishes last.
+    const prev = this.saveChains.get(meta.id) ?? Promise.resolve();
+    const next = prev.catch(() => {}).then(() => this.doSave(meta, tabMessages, tabCoreMessages));
+    this.saveChains.set(meta.id, next);
+    try {
+      await next;
+    } finally {
+      if (this.saveChains.get(meta.id) === next) {
+        this.saveChains.delete(meta.id);
+      }
+    }
+  }
+
+  private async doSave(
+    meta: SessionMeta,
+    tabMessages: Map<string, ChatMessage[]>,
+    tabCoreMessages?: Map<string, import("ai").ModelMessage[]>,
+  ): Promise<void> {
     this.ensureDir();
     const sessionDir = join(this.dir, meta.id);
 
@@ -427,4 +450,6 @@ export class SessionManager {
     if (text.length <= 60) return text;
     return `${text.slice(0, 57)}...`;
   }
+
+  private saveChains: Map<string, Promise<void>> = new Map();
 }
