@@ -1391,6 +1391,8 @@ export class ContextManager {
     this.soulMapDiffBlocks.clear();
     this.pendingSoulMapDiff = null;
     this.lastEmittedSoulMapDiff = null;
+    this.soulMapNewFilesEmitted.clear();
+    this.recentToolFailures.length = 0;
   }
 
   private pendingSoulMapDiff: string | null = null;
@@ -1466,15 +1468,16 @@ export class ContextManager {
     return this.pendingSoulMapDiff;
   }
 
-  /**
-   * Classify a delta file with provenance tags so Forge can prioritize.
-   * Returns an empty string when no provenance applies (avoids visual noise).
-   */
-  private classifyDeltaFile(absPath: string, _rel: string): string {
+  private classifyDeltaFile(absPath: string, rel: string): string {
     const tags: string[] = [];
     if (this.editedFiles.has(absPath)) tags.push("[edited]");
     if (this.mentionedFiles.has(absPath)) tags.push("[mentioned]");
     if (this.editorFile === absPath) tags.push("[open]");
+    if (this.soulMapNewFilesEmitted.has(rel) && existsSync(absPath)) {
+      tags.push("[modified-since-new]");
+    }
+    const failure = this.recentToolFailures.find((f) => f.target === absPath || f.target === rel);
+    if (failure) tags.push(`[recent failure: ${failure.tool} — ${failure.reason}]`);
     return tags.join(" ");
   }
 
@@ -1485,9 +1488,16 @@ export class ContextManager {
 
   commitSoulMapDiff(): void {
     if (this.pendingSoulMapDiff) {
-      // Don't clear soulMapDiffChangedFiles — keep accumulating so the diff
-      // is always cumulative since the snapshot. Only clear the built string
-      // so it rebuilds if new files are added.
+      // Mark all files currently in the delta as "emitted" so the next edit
+      // gets [modified-since-new] instead of repeating [new].
+      const hasSnapshot = this.soulMapSnapshotPaths.size > 0;
+      if (hasSnapshot) {
+        for (const rel of this.soulMapDiffChangedFiles.keys()) {
+          if (!this.soulMapSnapshotPaths.has(rel)) {
+            this.soulMapNewFilesEmitted.add(rel);
+          }
+        }
+      }
       this.lastEmittedSoulMapDiff = this.pendingSoulMapDiff;
       this.pendingSoulMapDiff = null;
     }
@@ -1758,6 +1768,25 @@ export class ContextManager {
   }
 
   private pendingSemanticMode: "ast" | "synthetic" | "llm" | "full" | "on" | null = null;
+  private soulMapNewFilesEmitted = new Set<string>();
+  private recentToolFailures: Array<{ tool: string; target: string; reason: string; at: number }> =
+    [];
+
+  recordToolFailure(tool: string, target: string, reason: string): void {
+    const at = Date.now();
+    const key = `${tool}:${target}`;
+    const existing = this.recentToolFailures.findIndex((f) => `${f.tool}:${f.target}` === key);
+    if (existing >= 0) this.recentToolFailures.splice(existing, 1);
+    this.recentToolFailures.push({ tool, target, reason, at });
+    if (this.recentToolFailures.length > 5) this.recentToolFailures.shift();
+    this.pendingSoulMapDiff = null;
+    if (target) {
+      const rel = target.startsWith(`${this.cwd}/`) ? target.slice(this.cwd.length + 1) : target;
+      if (!this.soulMapDiffChangedFiles.has(rel)) {
+        this.soulMapDiffChangedFiles.set(rel, ++this.soulMapDiffSeq);
+      }
+    }
+  }
 }
 
 export { extractConversationTerms } from "./conversation-terms.js";

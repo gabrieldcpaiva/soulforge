@@ -948,6 +948,27 @@ export function createForgeAgent({
         // NOTE: throwing here is swallowed by the SDK's notify() (ai/dist/index.mjs:519).
         // Actual surfacing happens in prepareStep — see buildForgePrepareStep above.
       }
+      // Record tool failures into the delta channel so prepareStep can surface
+      // a [recent failure: tool — reason] marker on affected files.
+      const results = (step as { toolResults?: unknown }).toolResults;
+      if (Array.isArray(results)) {
+        for (const r of results as Record<string, unknown>[]) {
+          const output = r.output as Record<string, unknown> | undefined;
+          const value = output?.value as Record<string, unknown> | undefined;
+          const success = value?.success;
+          if (success !== false) continue;
+          const tool = String(r.toolName ?? "tool");
+          const input = (r.input ?? {}) as Record<string, unknown>;
+          const target = String(input.path ?? input.file ?? input.absPath ?? input.relPath ?? "");
+          const reason =
+            typeof value?.error === "string"
+              ? value.error
+              : typeof value?.output === "string"
+                ? (value.output as string).slice(0, 80)
+                : "failed";
+          contextManager.recordToolFailure(tool, target, reason);
+        }
+      }
     },
     instructions: isProxyClaude
       ? undefined
