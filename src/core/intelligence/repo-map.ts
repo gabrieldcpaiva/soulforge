@@ -3466,7 +3466,6 @@ export class RepoMap {
       }));
   }
 
-  /** Get a compact diff block for a file: exported symbols with signatures + blast radius. */
   getFileDiffBlock(relPath: string): {
     blastRadius: number;
     symbols: Array<{ name: string; kind: string; signature: string | null; line: number }>;
@@ -3483,14 +3482,21 @@ export class RepoMap {
         )
         .get(fileRow.id)?.c ?? 0;
 
+    // Rank exported symbols by inbound callers (calls table) — surfaces the
+    // symbols actually used by other files, not just the first 10 by source
+    // order. Falls back to line order for symbols with no recorded callers.
     const symbols = this.db
       .query<{ name: string; kind: string; signature: string | null; line: number }, [number]>(
         `SELECT s.name, s.kind, s.signature, s.line
          FROM symbols s
+         LEFT JOIN (
+           SELECT callee_symbol_id, COUNT(*) AS c FROM calls
+           WHERE callee_symbol_id IS NOT NULL GROUP BY callee_symbol_id
+         ) cc ON cc.callee_symbol_id = s.id
          WHERE s.file_id = ?
            AND s.is_exported = 1
            AND s.kind IN ('interface','type','class','function','enum','method')
-         ORDER BY s.line
+         ORDER BY COALESCE(cc.c, 0) DESC, s.line ASC
          LIMIT 10`,
       )
       .all(fileRow.id);
