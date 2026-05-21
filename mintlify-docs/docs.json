@@ -93,6 +93,12 @@
               "reference/configuration",
               "troubleshooting"
             ]
+          },
+          {
+            "group": "Community",
+            "pages": [
+              "sponsors"
+            ]
           }
         ]
       }

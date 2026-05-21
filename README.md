@@ -103,9 +103,9 @@ Same model (Claude Opus 4.6), same codebase, same prompt.
 
 <a href="https://llmgateway.io/dashboard?ref=6tjJR2H3X4E9RmVQiQwK" title="LLM Gateway">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://llmgateway.io/brand/logo-with-name-white.svg" />
-    <source media="(prefers-color-scheme: light)" srcset="https://llmgateway.io/brand/logo-with-name-black.svg" />
-    <img alt="LLM Gateway" src="https://llmgateway.io/brand/logo-with-name-black.svg" height="56" />
+    <source media="(prefers-color-scheme: dark)" srcset="assets/llmg-white.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="assets/llmg-dark.svg" />
+    <img alt="LLM Gateway" src="assets/llmg-dark.svg" height="56" />
   </picture>
 </a>
 

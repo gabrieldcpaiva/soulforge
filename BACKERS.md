@@ -26,9 +26,9 @@ Premium partners. Logos appear in the README and on the docs site.
 <td align="center" width="50%">
 <a href="https://llmgateway.io">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://llmgateway.io/brand/logo-with-name-white.svg" />
-    <source media="(prefers-color-scheme: light)" srcset="https://llmgateway.io/brand/logo-with-name-black.svg" />
-    <img alt="LLM Gateway" src="https://llmgateway.io/brand/logo-with-name-black.svg" height="60" />
+    <source media="(prefers-color-scheme: dark)" srcset="assets/llmg-white.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="assets/llmg-dark.svg" />
+    <img alt="LLM Gateway" src="assets/llmg-dark.svg" height="60" />
   </picture>
 </a>
 <br/>
