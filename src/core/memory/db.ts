@@ -109,6 +109,11 @@ export class MemoryDB {
     this.db.run("PRAGMA busy_timeout = 5000");
     this.db.run("PRAGMA synchronous = NORMAL");
     this.db.run("PRAGMA foreign_keys = ON");
+    this.db.run("PRAGMA temp_store = MEMORY");
+    this.db.run("PRAGMA cache_size = -65536");
+    try {
+      this.db.run("PRAGMA mmap_size = 268435456");
+    } catch {}
     if (dbPath !== ":memory:") {
       // Use PASSIVE checkpoint: never blocks or errors other connections.
       // TRUNCATE on open races sibling sf processes and surfaces SQLITE_IOERR.

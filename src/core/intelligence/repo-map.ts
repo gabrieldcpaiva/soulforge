@@ -134,6 +134,12 @@ export class RepoMap {
     this.db.run("PRAGMA journal_mode = WAL");
     this.db.run("PRAGMA busy_timeout = 5000");
     this.db.run("PRAGMA foreign_keys = ON");
+    this.db.run("PRAGMA synchronous = NORMAL");
+    this.db.run("PRAGMA temp_store = MEMORY");
+    this.db.run("PRAGMA cache_size = -65536");
+    try {
+      this.db.run("PRAGMA mmap_size = 268435456");
+    } catch {}
     // Recover stale WAL from previous crash — checkpoint flushes WAL to main DB
     // and releases any leftover -shm locks from dead processes
     try {
@@ -326,6 +332,17 @@ export class RepoMap {
     // Migration: add confidence tier to edges
     try {
       this.db.run("ALTER TABLE edges ADD COLUMN confidence INTEGER NOT NULL DEFAULT 1");
+    } catch {}
+
+    // Meta key/value store — used for caching invariants like cochange HEAD sha
+    // and the last rendered map string. Pure additive, safe on old DBs.
+    try {
+      this.db.run(`
+        CREATE TABLE IF NOT EXISTS meta (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        )
+      `);
     } catch {}
 
     this.rebuildFts();
@@ -1987,6 +2004,14 @@ export class RepoMap {
   private async buildCoChanges(): Promise<void> {
     if (!this.detectGit()) return;
 
+    // Skip rebuild when git HEAD hasn't moved AND cochange data already exists.
+    // Cochange relationships are a pure function of git history — same HEAD → same data.
+    const head = await this.gitHeadSha();
+    const storedHead = this.metaGet("cochanges_head");
+    const rowCount =
+      this.db.query<{ c: number }, []>("SELECT COUNT(*) as c FROM cochanges").get()?.c ?? 0;
+    if (head && storedHead === head && rowCount > 0) return;
+
     this.db.run("DELETE FROM cochanges");
 
     let logOutput: string;
@@ -2038,7 +2063,10 @@ export class RepoMap {
       }
     }
 
-    if (pairCounts.size === 0) return;
+    if (pairCounts.size === 0) {
+      if (head) this.metaSet("cochanges_head", head);
+      return;
+    }
 
     this.onProgress?.(-5, -5); // heartbeat before DB insert
     const insert = this.db.prepare(
@@ -2061,6 +2089,7 @@ export class RepoMap {
       tx();
       if (i % 10000 === 0) this.onProgress?.(-5, -5); // heartbeat
     }
+    if (head) this.metaSet("cochanges_head", head);
   }
 
   private getCoChangePartners(fileIds: Set<number>): Map<number, number> {
@@ -2847,6 +2876,28 @@ export class RepoMap {
   render(opts: RepoMapOptions = {}): string {
     this.flushIfDirty();
 
+    // Persistent cache hit for clean-boot renders (no personalization yet).
+    // Cuts cold-start latency — the same boot map gets rendered every restart
+    // when the user hasn't touched anything. Cache key incorporates render
+    // format version, file count, max mtime, and token budget — any of those
+    // change → fall through to full render path.
+    const cleanBoot =
+      !opts.mentionedFiles?.length &&
+      !opts.editedFiles?.length &&
+      !opts.editorFile &&
+      !opts.conversationTokens;
+    const cacheKey = cleanBoot ? this.renderCacheKey(opts.tokenBudget) : null;
+    if (cacheKey) {
+      const cached = this.metaGet(`rendered_map:${cacheKey}`);
+      if (cached !== null) {
+        const pathsRaw = this.metaGet(`rendered_map_paths:${cacheKey}`);
+        if (pathsRaw !== null) {
+          this.lastRenderedPaths = pathsRaw ? pathsRaw.split("\n") : [];
+        }
+        return cached;
+      }
+    }
+
     // Recompute PageRank with personalization when we have conversation context
     const pv = this.buildPersonalization(opts);
     if (pv.size > 0) this.computePageRankSync(pv);
@@ -3139,7 +3190,12 @@ export class RepoMap {
     }
 
     this.lastRenderedPaths = currentPaths;
-    return lines.join("\n");
+    const result = lines.join("\n");
+    if (cacheKey) {
+      this.metaSet(`rendered_map:${cacheKey}`, result);
+      this.metaSet(`rendered_map_paths:${cacheKey}`, currentPaths.join("\n"));
+    }
+    return result;
   }
 
   private buildPersonalization(opts: RepoMapOptions): Map<number, number> {
@@ -4881,5 +4937,55 @@ export class RepoMap {
       }
     }
     this.db.close();
+  }
+
+  private metaGet(key: string): string | null {
+    try {
+      const row = this.db
+        .query<{ value: string }, [string]>("SELECT value FROM meta WHERE key = ?")
+        .get(key);
+      return row?.value ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  private metaSet(key: string, value: string): void {
+    try {
+      this.db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)").run(key, value);
+    } catch {}
+  }
+
+  private async gitHeadSha(): Promise<string | null> {
+    if (!this.detectGit()) return null;
+    try {
+      const { execFile } = await import("node:child_process");
+      return await new Promise<string | null>((resolve) => {
+        execFile("git", ["rev-parse", "HEAD"], { cwd: this.cwd, timeout: 2_000 }, (err, stdout) => {
+          if (err) resolve(null);
+          else resolve(stdout.trim() || null);
+        });
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  private static readonly RENDER_CACHE_VERSION = "v1";
+
+  private renderCacheKey(tokenBudget: number | undefined): string | null {
+    try {
+      const stats = this.db
+        .query<{ files: number; maxMtime: number }, []>(
+          "SELECT COUNT(*) as files, COALESCE(MAX(mtime_ms), 0) as maxMtime FROM files",
+        )
+        .get();
+      if (!stats || stats.files === 0) return null;
+      const head = this.metaGet("cochanges_head") ?? "no-head";
+      const budget = tokenBudget ?? "default";
+      return `${RepoMap.RENDER_CACHE_VERSION}:${stats.files}:${stats.maxMtime}:${head}:${budget}`;
+    } catch {
+      return null;
+    }
   }
 }
