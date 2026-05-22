@@ -1336,7 +1336,7 @@ export function useChat({
         }
       }
     },
-    [setTokenUsage, effectiveConfig, contextManager, cwd, tabId],
+    [setTokenUsage, effectiveConfig, contextManager, cwd, tabId, setMessages],
   );
   summarizeConversationRef.current = summarizeConversation;
 
@@ -3957,10 +3957,11 @@ export function useChat({
       tabLabel,
       setForgeMode,
       onModelChange,
-      setCoreMessagesEager, // Persist final state — coreMessagesRef is now caught up because
+      setCoreMessagesEager,
       // setCoreMessagesEager updates the ref synchronously inside its
       // reducer. messages was committed inside the setMessages above.
       persistThisTab,
+      setMessages,
     ],
   );
   handleSubmitRef.current = handleSubmit;
@@ -4027,7 +4028,7 @@ export function useChat({
       segmentsDirty.current = false;
       toolCallsDirty.current = false;
     }
-  }, [setActivePlan, tabId]);
+  }, [setActivePlan, tabId, setMessages]);
 
   // Snapshot current state for tab switching
   const snapshot = useCallback(
