@@ -413,7 +413,7 @@ describe("normalizePath edge cases", () => {
   test("handles trailing slash", () => expect(normalizePath("src/")).toBe("src/"));
 });
 
-// ── LockInStreamView: no stale terminology ───────────────────────────────
+// ── FinalResponseView: no stale terminology ─────────────────────────────
 
 describe("FinalResponseView dispatch pairs", () => {
   test("module loads without errors", async () => {
