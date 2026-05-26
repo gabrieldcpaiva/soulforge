@@ -104,7 +104,17 @@ export function LlmSelector({ visible, activeModel, onSelect, onClose }: Props) 
   }, [visible, providerData]);
 
   const groups = useMemo<GroupedListGroup<ModelRow>[]>(() => {
-    return PROVIDER_CONFIGS.map((cfg) => {
+    // Drop addon-gated providers entirely when the addon isn't installed.
+    // checkAvailability() returns false for proxy/etc when the addon is missing,
+    // and these providers have no key path (envVar === "") so showing them as
+    // "no key — press Enter to add" would be misleading.
+    const visibleConfigs = PROVIDER_CONFIGS.filter((cfg) => {
+      if (cfg.envVar !== "") return true; // key-based provider — always show
+      const avail = availability.get(cfg.id);
+      // Hide only when explicitly unavailable. `undefined` (still checking) keeps it visible.
+      return avail !== false;
+    });
+    return visibleConfigs.map((cfg) => {
       const pd = providerData[cfg.id];
       const avail = availability.get(cfg.id) ?? false;
       const loading = pd?.loading ?? true;
