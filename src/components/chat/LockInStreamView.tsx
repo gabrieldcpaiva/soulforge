@@ -15,6 +15,7 @@ import {
   TREE_PIPE,
   TREE_SPACE,
 } from "./ToolCallDisplay.js";
+import { ImageDisplay } from "./ImageDisplay.js";
 import { formatArgs } from "./tool-formatters.js";
 
 export const LOCKIN_EDIT_TOOLS = new Set([
@@ -85,6 +86,13 @@ export interface LockInTool {
   argStr: string;
   /** Optional sub-tree rendered as a tree continuation directly below this row (e.g. dispatch subagents). */
   subtree?: ReactNode;
+  imageArt?: Array<{
+    name: string;
+    lines: string[];
+    kittyImageId?: number;
+    kittyCols?: number;
+    kittyRows?: number;
+  }>;
 }
 
 export function filterQuietTools(name: string): boolean {
@@ -253,7 +261,7 @@ export const LockInWrapper = memo(function LockInWrapper({
             const isLast = i === visible.length - 1 && !children && !pendingNarration;
             const connector = isLast ? "└ " : i === 0 && hiddenCount === 0 ? "┌ " : "├ ";
             const statusClr = tc.done ? (tc.error ? t.error : t.success) : t.brand;
-            const isExpanded = !!toolExpanded?.[tc.id];
+            const isExpanded = toolExpanded?.[tc.id] ?? tc.name === "soul_vision";
 
             return (
               <box key={tc.id} flexDirection="column" flexShrink={0}>
@@ -287,6 +295,15 @@ export const LockInWrapper = memo(function LockInWrapper({
                   </box>
                 ) : null}
                 {interactive && isExpanded && toolDetails ? toolDetails(tc.id) : null}
+                {!toolDetails && tc.imageArt && tc.imageArt.length > 0 ? (
+                  <box flexDirection="column" paddingLeft={2} marginTop={1} marginBottom={1}>
+                    {tc.imageArt.map((img) => (
+                      <box key={img.name} flexDirection="column">
+                        <ImageDisplay img={img} />
+                      </box>
+                    ))}
+                  </box>
+                ) : null}
               </box>
             );
           })}
@@ -375,6 +392,7 @@ export const LockInLiveAutoView = memo(function LockInLiveAutoView({
         error: tc.state === "error",
         argStr: formatArgs(tc.toolName, tc.args),
         subtree: isDispatch ? <DispatchSubtree call={tc} /> : undefined,
+        imageArt: tc.imageArt,
       });
     }
     const prev = toolsRef.current;
@@ -388,7 +406,8 @@ export const LockInLiveAutoView = memo(function LockInLiveAutoView({
           p.done === next[i]?.done &&
           p.error === next[i]?.error &&
           p.argStr === next[i]?.argStr &&
-          !!p.subtree === !!next[i]?.subtree,
+          !!p.subtree === !!next[i]?.subtree &&
+          p.imageArt === next[i]?.imageArt,
       )
     ) {
       return prev;
