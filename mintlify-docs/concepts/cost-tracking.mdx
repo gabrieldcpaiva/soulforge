@@ -39,7 +39,7 @@ Custom providers default to a conservative estimate. Unknown models fall back to
 
 Two tactics cut cost dramatically:
 
-1. **Mix models.** Haiku for spark agents, Sonnet for ember agents, Flash for compaction. A task that would cost $0.25 on Sonnet often runs for $0.05 when the exploration phase routes through Haiku.
+1. **Mix models.** Haiku for spark agents, Sonnet for ember agents, Flash for compaction. A task that would cost \$0.25 on Sonnet often runs for \$0.05 when the exploration phase routes through Haiku.
 
 2. **Use caching.** Cache reads are 10x cheaper on Anthropic, up to 50% off on Groq/Fireworks. SoulForge structures the system prompt and the Soul Map for maximum cache hits — typical cache-hit rates exceed 60%.
 
