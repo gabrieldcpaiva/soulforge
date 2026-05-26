@@ -4,9 +4,11 @@ description: "Common questions, short answers."
 icon: "circle-question"
 ---
 
+Stuck on something? Drop into the [Discord](https://discord.gg/fX4H7GYSMJ) — fastest way to get an answer.
+
 ## Does it run on Windows?
 
-Not natively. Use [WSL](https://learn.microsoft.com/en-us/windows/wsl/install) — install SoulForge inside a Linux distro and it works exactly like macOS/Linux. Tracked in [#57](https://github.com/proxysoul/soulforge/issues/57).
+Yes — natively on Windows 10 1809+ and Windows 11 (x64). PowerShell one-liner installer, NSIS setup wizard, or portable ZIP. Secrets are DPAPI-encrypted. WSL also works if you prefer the Linux path. See the [Windows guide](/windows) for limits (no embedded floating terminal, no Kitty image preview).
 
 ## Do I need Neovim?
 
@@ -36,7 +38,7 @@ Local models are free. Use the [task router](/recipes/task-router) to push explo
 
 ## Which model should I pick?
 
-- **Claude Sonnet 4.6** for balanced code quality.
+- **Claude Sonnet 4.5** for balanced code quality.
 - **Claude Haiku 4.5** for fast exploration and cleanup.
 - **Google Gemini 2.5 Flash** for compaction (cheapest, fastest).
 - **Local Llama/Qwen/DeepSeek** if you want $0 and privacy.
@@ -70,7 +72,9 @@ Yes. Use it anywhere, anytime, for free — personal projects, startups, enterpr
 
 ## What languages does code intelligence cover?
 
-LSP and tree-sitter support for: TypeScript, JavaScript, Python, Go, Rust, Java, Kotlin, Scala, C#, Swift, Dart, Elixir, OCaml, Lua, C, C++, Ruby, PHP, Zig, Bash, CSS, HTML, JSON, TOML, YAML, Dockerfile, Vue, ReScript, Solidity, TLA+, Emacs Lisp, Objective-C.
+Tree-sitter detection covers: TypeScript, JavaScript, Python, Go, Rust, Java, Kotlin, Scala, C#, Swift, Dart, Elixir, OCaml, Lua, C, C++, Ruby, PHP, Zig, Bash, CSS, HTML, JSON, TOML, YAML, XML, Markdown, MDX, SQL, GraphQL, Protobuf, Dockerfile, Makefile, Nix, HCL/Terraform, Bazel/Starlark, Jsonnet, Vue, ReScript, Solidity, TLA+, Emacs Lisp, Objective-C.
+
+LSP coverage depends on what's installed via Mason — typical set: TypeScript, JavaScript, Python, Go, Rust, Java, Kotlin, Scala, C#, Swift, Dart, Elixir, OCaml, Lua, C, C++, Ruby, PHP, Zig, Bash, CSS, HTML, JSON, TOML, YAML, Dockerfile, Vue.
 
 AST editing (ts-morph) is TypeScript and JavaScript only. Everything else uses LSP and tree-sitter.
 

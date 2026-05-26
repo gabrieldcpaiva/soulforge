@@ -13,6 +13,7 @@
   <a href="https://github.com/ProxySoul/soulforge/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/ProxySoul/soulforge/ci.yml?label=ci&style=flat-square" /></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-BSL%201.1-blue.svg?style=flat-square" /></a>
   <a href="https://soulforge.proxysoul.com"><img alt="Docs" src="https://img.shields.io/badge/docs-soulforge.proxysoul.com-555.svg?style=flat-square" /></a>
+    <a href="https://discord.gg/fX4H7GYSMJ"><img alt="Discord" src="https://img.shields.io/badge/discord-join-5865F2.svg?style=flat-square&logo=discord&logoColor=white" /></a>
 </p>
 
 </div>

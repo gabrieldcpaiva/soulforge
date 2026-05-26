@@ -73,8 +73,9 @@
               "tools/hooks",
               "tools/checkpoints",
               "tools/themes",
-              "tools/terminals"
-            ]
+              "tools/terminals",
+            "tools/addons"
+          ]
           },
           {
             "group": "How it works",
@@ -98,8 +99,9 @@
             "pages": [
               "reference/commands",
               "reference/configuration",
-              "troubleshooting"
-            ]
+              "reference/presets",
+            "troubleshooting"
+          ]
           }
           ]
       }
@@ -112,6 +114,11 @@
           "icon": "github"
         },
         {
+          "anchor": "Discord",
+          "href": "https://discord.gg/fX4H7GYSMJ",
+          "icon": "discord"
+        },
+          {
           "anchor": "Blog",
           "href": "https://proxysoul.com/blog/soulforge",
           "icon": "newspaper"
@@ -153,6 +160,7 @@
   "footer": {
     "socials": {
       "github": "https://github.com/proxysoul/soulforge",
+      "discord": "https://discord.gg/fX4H7GYSMJ",
       "linkedin": "https://linkedin.com/in/pouiiro",
       "x": "https://x.com/proxysoul"
     }
