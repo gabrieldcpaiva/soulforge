@@ -14,14 +14,12 @@ icon: "download"
     Neovim and a Nerd Font are auto-installed on first launch.
   </Tab>
   <Tab title="Windows">
-    ```powershell
-    powershell -c "irm https://soulforge.dev/install.ps1 | iex"
-    ```
-    Installs to `%LOCALAPPDATA%\SoulForge\bin` (no admin needed) and adds it to your User PATH. Open a new terminal after install.
+    Download `soulforge-<version>-windows-x64.zip` (portable) or `soulforge-setup-<version>-x64.exe` (setup wizard) from the [latest release](https://github.com/proxysoul/soulforge/releases/latest).
 
-    Prefer a setup wizard? Download `soulforge-setup-<version>-x64.exe` from the [latest release](https://github.com/proxysoul/soulforge/releases/latest).
+    - **Portable ZIP**: extract anywhere and run `soulforge.exe`. Keep the `deps/` folder next to the executable.
+    - **Setup wizard**: double-click. Per-user install to `%LOCALAPPDATA%\Programs\SoulForge`, no UAC prompt, registers in Settings → Apps.
 
-    Requires Windows 10 1809+ or Windows 11. ARM64 is not supported yet (tracked upstream — see release notes). SmartScreen may warn on first run — click **More info → Run anyway**.
+    Requires Windows 10 1809+ or Windows 11 (x64). ARM64 is not supported yet. SmartScreen may warn on first run — click **More info → Run anyway**.
   </Tab>
 </Tabs>
 
@@ -34,15 +32,12 @@ icon: "download"
       ```
       Windows: download `soulforge-<version>-windows-x64.zip`, unzip anywhere, run `soulforge.exe`.
     </Tab>
-    <Tab title="Bun">
-      Requires [Bun](https://bun.sh) >= 1.3.13.
+    <Tab title="Bun / npm">
+      Requires [Bun](https://bun.sh) >= 1.3.13 or Node 20+.
       ```bash
       bun install -g @proxysoul/soulforge
-      ```
-    </Tab>
-    <Tab title="WinGet (Windows)">
-      ```powershell
-      winget install ProxySoul.SoulForge
+      # or
+      npm install -g @proxysoul/soulforge
       ```
     </Tab>
     <Tab title="Source">
@@ -53,6 +48,18 @@ icon: "download"
     </Tab>
   </Tabs>
 </Accordion>
+
+## Windows notes
+
+SoulForge stores config + data under `%LOCALAPPDATA%\SoulForge`. Secrets are DPAPI-encrypted (`crypt32.dll`, user-scoped).
+
+A couple of features are off by default on Windows:
+
+- Embedded floating terminal panel — disabled (`ghostty-opentui` native addon has no stable win32 build). Override with `SOULFORGE_ENABLE_GHOSTTY=1` if you've patched it locally.
+- Kitty graphics image preview — disabled (Windows Terminal + ConPTY don't speak the protocol). Half-block art still works.
+- `glob` tool `find` fallback — install `fd` (`winget install sharkdp.fd`) for full glob support.
+
+Everything else — all 21 providers, every tool, LSP, Soul Map, sessions, checkpoints, memory, MCP, themes, headless mode — works identically across macOS, Linux, and Windows.
 
 ## Add a key
 

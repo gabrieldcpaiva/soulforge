@@ -238,14 +238,14 @@ Built-ins already cover `.env`, `.pem`, `credentials`, `id_rsa`, `.npmrc`, `.net
 | `SOULFORGE_NO_PROMPT` | unset | Skip first-run addon wizard (set to `1`). Useful in CI. |
 | `SOULFORGE_DEBUG_API` | unset | Dump per-step API requests to `~/.soulforge/api-export/`. |
 | `SOULFORGE_DEV_UI` | unset | Show dev-only slash commands (`/ui-demo`, etc). |
-| `SOULFORGE_ENABLE_GHOSTTY` | unset | Force-enable the embedded floating terminal on Windows (off by default — see [Windows limits](/windows#whats-limited-on-windows)). |
+| `SOULFORGE_ENABLE_GHOSTTY` | unset | Force-enable the embedded floating terminal on Windows (off by default — see [Windows notes](/installation#windows-notes)). |
 | `SOULFORGE_HEARTH_SOCKET` | `<configDir>/hearth.sock` | Override the Hearth IPC socket path. |
 | `SOULFORGE_HEARTH_APPROVAL_TIMEOUT_MS` | `300000` | Approval timeout for remote tool calls. |
 | `SOULFORGE_HEARTH_DENY_READ_REMOTE` | unset | Block read-only tools from remote surfaces (set to `1`). |
 | `SOULFORGE_PROXY_VERSION` | latest | Pin a CLIProxyAPI version when installing the proxy addon. |
 | `SOULFORGE_AUTO_INSTALL_ADDONS` | unset | Comma-separated addons to install automatically (`proxy,neovim`). |
 
-Install-time variables (read by `scripts/install.ps1` on Windows): `SOULFORGE_VERSION`, `SOULFORGE_INSTALL_DIR`, `SOULFORGE_NO_PATH`. See [Windows](/windows#quick-install).
+
 
 ## Hooks
 

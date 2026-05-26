@@ -141,17 +141,13 @@ soulforge --headless --chat            # browse by timestamp
 
 Or open `/session history` inside SoulForge. Sessions live in `~/.soulforge/sessions/`.
 
-## Windows: command not found / fails to start
+## Windows: command not found after install
 
-SoulForge is not natively supported on Windows. Run it inside [WSL](https://learn.microsoft.com/en-us/windows/wsl/install):
+PATH updates don't apply to the shell that ran the installer. Open a brand-new PowerShell or Windows Terminal window.
 
-```powershell
-wsl --install
-# then inside WSL:
-brew install proxysoul/tap/soulforge   # or: bun install -g @proxysoul/soulforge
-```
+If you used the portable ZIP, make sure the extract folder is on your `PATH` or call `soulforge.exe` by full path. The `deps/` folder must stay next to `soulforge.exe`.
 
-Native Windows support is tracked in [#57](https://github.com/proxysoul/soulforge/issues/57).
+See the Windows section of [installation](/installation#windows-notes) for the full feature matrix.
 
 ## Still stuck?
 
