@@ -15,7 +15,7 @@ import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig, saveGlobalConfig } from "../../config/index.js";
 import { logBackgroundError } from "../../stores/errors.js";
-import { dataDir, EXE } from "../platform/index.js";
+import { commandExists, dataDir, EXE } from "../platform/index.js";
 import { getVendoredPath, installNeovim, installProxy } from "./install.js";
 
 export const ADDON_NAMES = ["proxy", "neovim"] as const;
@@ -45,13 +45,43 @@ export interface AddonStatus {
 }
 
 /**
- * Source of truth for "is this addon installed". A config entry alone is not
- * enough — the binary must still exist on disk (covers manual cleanup +
- * pre-addon installs where the binary is present but config is silent).
+ * Source of truth for "can we use this addon". Considers BOTH the vendored
+ * install AND a system binary on PATH (brew, apt, scoop, etc.) — otherwise a
+ * user with `brew install cliproxyapi` would see proxy hidden from /model
+ * despite having a working binary.
+ *
+ * Note: `getVendoredPath` already covers manual cleanup (returns null on
+ * missing/dangling symlink). System PATH check is the second source so
+ * package-manager-managed installs Just Work without `addon install`.
  */
 export function isAddonInstalled(name: AddonName): boolean {
+  if (name === "proxy") {
+    return (
+      getVendoredPath("cli-proxy-api") !== null ||
+      commandExists("cli-proxy-api") ||
+      commandExists("cliproxyapi")
+    );
+  }
+  if (name === "neovim") {
+    return getVendoredPath("nvim") !== null || commandExists("nvim");
+  }
+  return false;
+}
+
+/** True only when our vendored binary is present (not a system PATH copy).
+ *  Used by `remove` to know whether there's anything WE can uninstall. */
+export function isVendoredAddonInstalled(name: AddonName): boolean {
   if (name === "proxy") return getVendoredPath("cli-proxy-api") !== null;
   if (name === "neovim") return getVendoredPath("nvim") !== null;
+  return false;
+}
+
+/** True when a usable binary lives outside our managed install dir. */
+function hasSystemBinary(name: AddonName): boolean {
+  if (name === "proxy") {
+    return commandExists("cli-proxy-api") || commandExists("cliproxyapi");
+  }
+  if (name === "neovim") return commandExists("nvim");
   return false;
 }
 
@@ -59,8 +89,11 @@ export function listAddons(): AddonStatus[] {
   const cfg = loadConfig();
   return ADDON_NAMES.map((name) => {
     const record = cfg.addons?.[name];
+    const vendored = isVendoredAddonInstalled(name);
     const installed = isAddonInstalled(name);
-    const path = installed ? join(BIN_DIR, ADDON_BIN[name]) : undefined;
+    // `path` reflects what soulforge controls — only set when WE installed it.
+    // System-PATH binaries are visible via isAddonInstalled but not "ours".
+    const path = vendored ? join(BIN_DIR, ADDON_BIN[name]) : undefined;
     return {
       name,
       installed,
@@ -73,8 +106,32 @@ export function listAddons(): AddonStatus[] {
 
 type StatusCallback = (msg: string) => void;
 
-export async function installAddon(name: AddonName, onStatus?: StatusCallback): Promise<void> {
+export interface InstallOptions {
+  /** Reinstall even if a vendored copy already exists. Default: false. */
+  force?: boolean;
+}
+
+export async function installAddon(
+  name: AddonName,
+  onStatus?: StatusCallback,
+  opts: InstallOptions = {},
+): Promise<void> {
   const log = (m: string) => onStatus?.(m);
+
+  // Already vendored — skip the download to avoid clobbering a healthy
+  // install. `update` callers pass force:true to bypass this.
+  if (!opts.force && isVendoredAddonInstalled(name)) {
+    log(`${name} addon is already installed. Use \`soulforge addon update ${name}\` to reinstall.`);
+    return;
+  }
+
+  // System binary on PATH — print a hint but proceed (vendoring our own copy
+  // keeps versions consistent across machines + survives PATH changes).
+  if (!opts.force && hasSystemBinary(name)) {
+    log(
+      `Note: a system \`${name === "proxy" ? "cli-proxy-api" : "nvim"}\` is already on your PATH; the addon will install a separate vendored copy under ~/.soulforge/bin.`,
+    );
+  }
 
   if (name === "proxy") {
     log("Installing CLIProxyAPI…");
@@ -103,11 +160,29 @@ export async function installAddon(name: AddonName, onStatus?: StatusCallback): 
 export async function removeAddon(name: AddonName, onStatus?: StatusCallback): Promise<void> {
   const log = (m: string) => onStatus?.(m);
 
+  // Nothing of ours to remove — surface a clear message instead of pretending
+  // we did something. System binaries on PATH are managed by their owner
+  // (brew/apt/scoop/etc.) and must be removed there.
+  if (!isVendoredAddonInstalled(name)) {
+    if (hasSystemBinary(name)) {
+      log(
+        `${name} is not managed by soulforge — it's installed on your system PATH. Remove it via your package manager.`,
+      );
+    } else {
+      log(`${name} addon is not installed.`);
+    }
+    return;
+  }
+
   // Best-effort: kill any running instance so unlink doesn't EBUSY on Windows.
+  // Also wipe the cached version stamp so a reinstall doesn't see stale state.
   if (name === "proxy") {
     try {
       const { stopProxy } = await import("../proxy/lifecycle.js");
       stopProxy();
+    } catch {}
+    try {
+      rmSync(join(dataDir(), "proxy", "version"), { force: true });
     } catch {}
   }
 
@@ -123,13 +198,14 @@ export async function removeAddon(name: AddonName, onStatus?: StatusCallback): P
     }
   }
 
-  // Remove every versioned install dir matching this addon's prefix.
+  // Remove every versioned install dir matching this addon's prefix +
+  // version digit, so a stray sibling like `nvim-config/` is never touched.
   const prefix = ADDON_INSTALL_PREFIX[name];
   try {
     const { readdirSync } = await import("node:fs");
     if (existsSync(INSTALLS_DIR)) {
       for (const entry of readdirSync(INSTALLS_DIR)) {
-        if (entry.startsWith(prefix)) {
+        if (entry.startsWith(prefix) && /\d/.test(entry.slice(prefix.length, prefix.length + 1))) {
           rmSync(join(INSTALLS_DIR, entry), { recursive: true, force: true });
         }
       }
@@ -154,7 +230,13 @@ export async function removeAddon(name: AddonName, onStatus?: StatusCallback): P
       resetNvimDetection();
     } catch {}
   }
+
   log(`Removed ${name} addon.`);
+  if (hasSystemBinary(name)) {
+    log(
+      `A system \`${name === "proxy" ? "cli-proxy-api" : "nvim"}\` is still on your PATH and will continue to be used.`,
+    );
+  }
 }
 
 function recordInstall(name: AddonName, version?: string): void {
@@ -173,6 +255,11 @@ function recordInstall(name: AddonName, version?: string): void {
 export async function runAddonCli(args: string[]): Promise<number> {
   const verb = args[0];
   const target = args[1];
+
+  if (verb === "--help" || verb === "-h" || verb === "help") {
+    process.stdout.write(usage());
+    return 0;
+  }
 
   if (!verb || verb === "list" || verb === "ls" || verb === "-l") {
     printList();
@@ -224,9 +311,9 @@ export async function runAddonCli(args: string[]): Promise<number> {
       process.stderr.write(`Unknown addon: ${target}\n${usage()}`);
       return 1;
     }
-    // Update = reinstall over the top.
+    // Update = reinstall over the top (force bypasses the already-installed guard).
     try {
-      await installAddon(target, (m) => process.stdout.write(`${m}\n`));
+      await installAddon(target, (m) => process.stdout.write(`${m}\n`), { force: true });
       return 0;
     } catch (err) {
       process.stderr.write(`Update failed: ${err instanceof Error ? err.message : String(err)}\n`);
@@ -246,10 +333,12 @@ function printList(): void {
   const rows = listAddons();
   process.stdout.write("Addons\n");
   for (const r of rows) {
-    const status = r.installed ? "installed" : "not installed";
+    const vendored = isVendoredAddonInstalled(r.name);
+    const system = !vendored && hasSystemBinary(r.name);
+    const status = vendored ? "installed" : system ? "system PATH" : "not installed";
     const ver = r.version ? ` v${r.version}` : "";
     process.stdout.write(`  ${r.name.padEnd(8)} ${status}${ver}\n`);
-    if (r.installed && r.path) process.stdout.write(`           ${r.path}\n`);
+    if (vendored && r.path) process.stdout.write(`           ${r.path}\n`);
   }
   process.stdout.write("\nUsage: soulforge addon <install|remove|update|list> [proxy|neovim]\n");
 }
