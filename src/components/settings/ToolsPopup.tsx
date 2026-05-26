@@ -28,7 +28,7 @@ export function ToolsPopup({ visible, disabledTools, onToggleTool, onClose }: Pr
 
   // Live catalog — hides addon-gated tools (e.g. `editor`) when the addon is missing.
   // Re-evaluated each render so installing/removing an addon updates the popup without restart.
-  const catalog = useMemo(() => getToolCatalog(), [visible]);
+  const catalog = useMemo(() => getToolCatalog(), []);
 
   useEffect(() => {
     if (visible) setCursor(0);

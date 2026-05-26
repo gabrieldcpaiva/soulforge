@@ -26,6 +26,7 @@ import {
 } from "../llm/provider-options.js";
 import { getMCPManager } from "../mcp/index.js";
 import { resolveRetrySettings } from "../retry/settings.js";
+import { isToolAvailable } from "../tools/constants.js";
 import {
   buildInteractiveTools,
   buildTools,
@@ -44,7 +45,6 @@ import {
   sanitizeMessages,
 } from "./stream-options.js";
 import { buildSubagentTools, type SharedCacheRef } from "./subagent-tools.js";
-import { isToolAvailable } from "../tools/constants.js";
 
 /** Per-tool-call-part signature cache for loop detection. Tool-call inputs are
  *  immutable; the part object is reused across prepareStep invocations as
