@@ -2,6 +2,13 @@
 
 All notable changes to SoulForge are documented here.
 
+## [2.18.1] — 2026-05-27
+
+### Bug Fixes
+
+- **brew**: widen gzip glob to deps/**/*.{node,dylib,so}
+- **build**: externalize native + asset deps from main dist bundle
+- **bundle**: externalize native + asset deps from worker bundles
 ## [2.18.0] — 2026-05-27
 
 ### Bug Fixes
