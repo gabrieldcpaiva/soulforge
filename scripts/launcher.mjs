@@ -78,12 +78,43 @@ if (!existsSync(entry)) {
   process.exit(1);
 }
 
+// detached:true puts the child in its own process group (POSIX) / detaches
+// from the parent console (Windows). The child's cleanup path calls
+// `kill(-pid, SIGTERM)` to reap orphaned grandchildren — without a separate
+// group that signal would also terminate this launcher, causing zsh/bash to
+// print "terminated soulforge" and scroll past the child's exit banner.
 const child = spawn(bun, [entry, ...process.argv.slice(2)], {
   stdio: "inherit",
+  detached: !isWindows,
   windowsHide: false,
 });
+
+// Forward terminal signals to the child's group. On POSIX with detached:true
+// the TTY no longer broadcasts SIGINT to the child automatically, so we relay.
+// On Windows the console still routes Ctrl+C/Break to the child; these
+// handlers are harmless no-ops there (signal forwarding via process.kill on
+// Windows just terminates — child handles its own console events).
+const FORWARDED = ["SIGINT", "SIGTERM", "SIGHUP"];
+for (const sig of FORWARDED) {
+  process.on(sig, () => {
+    try {
+      if (isWindows) {
+        // Windows: signal the child directly; no process-group concept.
+        child.kill(sig);
+      } else {
+        // POSIX: signal the child's process group so its own children get it too.
+        process.kill(-child.pid, sig);
+      }
+    } catch {
+      // Child already gone — let our own exit logic run.
+    }
+  });
+}
+
 child.on("exit", (code, signal) => {
   if (signal) {
+    // Re-raise so the parent shell sees the correct exit status, but only
+    // for genuine signal terminations — clean exits with code 0 fall through.
     process.kill(process.pid, signal);
   } else {
     process.exit(code ?? 0);
