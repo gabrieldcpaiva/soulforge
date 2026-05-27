@@ -778,14 +778,14 @@ describe("buildCustomProvider.fetchModels", () => {
 			return Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 }));
 		});
 
- 		const def = buildCustomProvider({
- 			id: "deeppath",
- 			baseURL: "https://api.test.com/api/v2/v1",
- 		});
- 		await def.fetchModels();
- 		// Only the final /v1 segment is stripped
- 		expect(capturedUrl).toBe("https://api.test.com/api/v2/models");
- 	});
+		const def = buildCustomProvider({
+			id: "deeppath",
+			baseURL: "https://api.test.com/api/v2/v1",
+		});
+		await def.fetchModels();
+		// Only the final /v1 segment is stripped
+		expect(capturedUrl).toBe("https://api.test.com/api/v2/models");
+	});
 
 	test("strips trailing slash from baseURL to prevent double-slash in models URL", async () => {
 		let capturedUrl: string | undefined;
@@ -794,13 +794,13 @@ describe("buildCustomProvider.fetchModels", () => {
 			return Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 }));
 		});
 
- 		const def = buildCustomProvider({
- 			id: "trailingslash",
- 			baseURL: "https://api.test.com/",
- 		});
- 		await def.fetchModels();
- 		expect(capturedUrl).toBe("https://api.test.com/models");
- 	});
+		const def = buildCustomProvider({
+			id: "trailingslash",
+			baseURL: "https://api.test.com/",
+		});
+		await def.fetchModels();
+		expect(capturedUrl).toBe("https://api.test.com/models");
+	});
 
 	test("preserves context_length: 0 in response mapping", async () => {
 		globalThis.fetch = mock(() =>
@@ -814,14 +814,74 @@ describe("buildCustomProvider.fetchModels", () => {
 			),
 		);
 
- 		const def = buildCustomProvider({
- 			id: "ctxzero",
- 			baseURL: "https://api.test.com/v1",
- 		});
- 		const models = await def.fetchModels();
- 		expect(models![0].contextWindow).toBe(0);
- 	});
- });
+		const def = buildCustomProvider({
+			id: "ctxzero",
+			baseURL: "https://api.test.com/v1",
+		});
+		const models = await def.fetchModels();
+		expect(models![0].contextWindow).toBe(0);
+	});
+
+	test("maps LM Studio max_context_length to contextWindow", async () => {
+		globalThis.fetch = mock(() =>
+			Promise.resolve(
+				new Response(
+					JSON.stringify({
+						data: [{ id: "qwen2.5-coder", max_context_length: 32_768 }],
+					}),
+					{ status: 200 },
+				),
+			),
+		);
+
+		const def = buildCustomProvider({
+			id: "lmstudio",
+			baseURL: "https://api.test.com/v1",
+		});
+		const models = await def.fetchModels();
+		expect(models![0].contextWindow).toBe(32_768);
+	});
+
+	test("maps llama.cpp meta.n_ctx_train to contextWindow", async () => {
+		globalThis.fetch = mock(() =>
+			Promise.resolve(
+				new Response(
+					JSON.stringify({
+						data: [{ id: "llama-3.1", meta: { n_ctx_train: 131_072 } }],
+					}),
+					{ status: 200 },
+				),
+			),
+		);
+
+		const def = buildCustomProvider({
+			id: "llamacpp",
+			baseURL: "https://api.test.com/v1",
+		});
+		const models = await def.fetchModels();
+		expect(models![0].contextWindow).toBe(131_072);
+	});
+
+	test("maps LiteLLM model_info.max_input_tokens (stringified) to contextWindow", async () => {
+		globalThis.fetch = mock(() =>
+			Promise.resolve(
+				new Response(
+					JSON.stringify({
+						data: [{ id: "gpt-4o", model_info: { max_input_tokens: "128000" } }],
+					}),
+					{ status: 200 },
+				),
+			),
+		);
+
+		const def = buildCustomProvider({
+			id: "litellm",
+			baseURL: "https://api.test.com/v1",
+		});
+		const models = await def.fetchModels();
+		expect(models![0].contextWindow).toBe(128_000);
+	});
+});
 
 describe("buildCustomProvider reasoning config", () => {
 	const originalFetch = globalThis.fetch;

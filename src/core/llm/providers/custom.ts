@@ -11,12 +11,17 @@ import type {
 interface OpenAIModelListEntry {
   id: string;
   owned_by?: string;
-  /** OpenAI-compatible servers that return a top-level context length field.
-   *  OpenRouter uses `context_length`. OpenAI / vLLM / Ollama omit it entirely. */
+  /** OpenRouter returns top-level `context_length`. */
   context_length?: number;
+  /** LM Studio `/api/v0/models` returns `max_context_length`. */
+  max_context_length?: number;
   /** LiteLLM nests context length under model_info (number or stringified number). */
   model_info?: {
     max_input_tokens?: number | string;
+  };
+  /** llama.cpp nests training context under `meta.n_ctx_train`. */
+  meta?: {
+    n_ctx_train?: number;
   };
 }
 
@@ -118,8 +123,17 @@ export function buildCustomProvider(config: CustomProviderConfig): ProviderDefin
       if (!Array.isArray(parsed.data)) return null;
 
       return parsed.data.map((m) => {
-        const rawContext = m.context_length ?? m.model_info?.max_input_tokens;
-        const contextWindow = typeof rawContext === "number" ? rawContext : Number(rawContext);
+        const rawContext =
+          m.context_length ??
+          m.max_context_length ??
+          m.model_info?.max_input_tokens ??
+          m.meta?.n_ctx_train;
+        const contextWindow =
+          typeof rawContext === "number"
+            ? rawContext
+            : typeof rawContext === "string"
+              ? Number(rawContext)
+              : undefined;
         return {
           id: m.id,
           name: m.id,
