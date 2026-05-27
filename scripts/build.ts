@@ -382,10 +382,22 @@ if (isCompile) {
   }
 
   // Build workers separately — npm installs need them as standalone files.
-  // --external native + asset packages so Bun doesn't fan them out into
-  // hash-named .node/.scm/.wasm chunks next to the worker JS (Homebrew's
-  // keg_relocate chokes on Mach-O files it can't patch). Workers never
-  // invoke the terminal-rendering surface; they only need the JS shells.
+  //
+  // --external only the binary asset packages (.node, .wasm, .scm). The TUI
+  // packages (@opentui/core, ghostty-opentui, tree-sitter-wasms) USED to be
+  // externalised here too — that was a fix-on-top-of-fix for 2.18.x, where
+  // io.worker.ts transitively pulled the entire TUI tree via
+  // summarize.ts → provider-options.ts → providers/index.ts → src/index.tsx.
+  // Externalising the natives made the bundle smaller but left literal
+  // `require("@opentui/core")` calls in the worker JS that exploded at
+  // runtime with "Worker has been terminated" (issue surfaced as the
+  // LLM Gateway crash in 2.18.0/2.18.1).
+  //
+  // The proper fix lives in the source: worker handlers now import from
+  // leaf-only modules (convo-text.ts, model-id.ts) and never reach into
+  // the TUI graph. The leak canary below enforces that invariant on every
+  // build — drop a TUI import into a worker handler chain and the build
+  // fails before it ships.
   const workerResult = await Bun.build({
     entrypoints: [
       "src/core/workers/intelligence.worker.ts",
@@ -395,12 +407,6 @@ if (isCompile) {
     target: "bun",
     naming: "[name].[ext]",
     external: [
-      "ghostty-opentui",
-      "ghostty-opentui/*",
-      "@opentui/core",
-      "@opentui/core/*",
-      "tree-sitter-wasms",
-      "tree-sitter-wasms/*",
       "*.node",
       "*.wasm",
       "*.scm",
@@ -413,6 +419,38 @@ if (isCompile) {
   if (!workerResult.success) {
     console.error("Worker build failed:");
     for (const log of workerResult.logs) console.error(log);
+    process.exit(1);
+  }
+
+  // ── Worker bundle leak canary ─────────────────────────────────────
+  // Drop a TUI import into a worker handler chain and this fails. The
+  // io worker MUST stay TUI-free — its dynamic-import handlers must only
+  // reach leaf modules. The intelligence worker legitimately pulls shiki
+  // + tree-sitter, so it's allowed a larger surface, but still no TUI.
+  const IO_FORBIDDEN = [
+    "src/index.tsx",
+    "@opentui/core",
+    "ghostty-opentui",
+    "src/components/",
+    "react/cjs/react.development",
+  ];
+  const INTEL_FORBIDDEN = [
+    "src/index.tsx",
+    "@opentui/core",
+    "ghostty-opentui",
+    "src/components/",
+  ];
+  const ioBundle = await Bun.file("dist/workers/io.worker.js").text();
+  const intelBundle = await Bun.file("dist/workers/intelligence.worker.js").text();
+  const ioLeaks = IO_FORBIDDEN.filter((n) => ioBundle.includes(n));
+  const intelLeaks = INTEL_FORBIDDEN.filter((n) => intelBundle.includes(n));
+  if (ioLeaks.length > 0 || intelLeaks.length > 0) {
+    if (ioLeaks.length > 0) console.error(`✗ io.worker.js leaks: ${ioLeaks.join(", ")}`);
+    if (intelLeaks.length > 0)
+      console.error(`✗ intelligence.worker.js leaks: ${intelLeaks.join(", ")}`);
+    console.error(
+      "  worker handlers must only import leaf modules — see scripts/build.ts canary comment.",
+    );
     process.exit(1);
   }
 

@@ -3713,12 +3713,34 @@ export function useChat({
           }
           // Mark in-flight tool calls as interrupted so they don't show stuck spinners
           if (isAbort) {
+            // Re-hydrate finalSegments from the snapshot when the working array is
+            // missing segments that the live buffer still had at abort time.
+            // Abort can land between flush ticks, so finalSegments may not yet
+            // reflect the most recent tool-input-start that pushed into the
+            // live stream buffer.
+            if (abortedSegmentsSnapshot.current.length > finalSegments.length) {
+              finalSegments.length = 0;
+              for (const seg of abortedSegmentsSnapshot.current) {
+                if (seg.type === "tools") {
+                  finalSegments.push({ type: "tools", toolCallIds: [...seg.callIds] });
+                } else if (seg.type === "text") {
+                  finalSegments.push({ type: "text", content: seg.content });
+                } else if (seg.type === "reasoning") {
+                  finalSegments.push({
+                    type: "reasoning",
+                    content: seg.content,
+                    id: seg.id,
+                  });
+                }
+              }
+            }
             const completedIds = new Set(completedCalls.map((c) => c.id));
             // Use snapshot saved before abort() cleared the buffers
             const liveBuf =
               abortedToolCallsSnapshot.current.length > 0
                 ? abortedToolCallsSnapshot.current
                 : liveToolCallsBuffer.current;
+            const recoveredIds = new Set<string>();
             for (const seg of finalSegments) {
               if (seg.type === "tools") {
                 for (const id of seg.toolCallIds) {
@@ -3731,8 +3753,34 @@ export function useChat({
                       args,
                       result: { success: false, output: "", error: "Interrupted by user (Ctrl+X)" },
                     });
+                    recoveredIds.add(id);
                   }
                 }
+              }
+            }
+            // Catch any live tool calls that never made it into a tools segment
+            // (e.g. tool-input-start fired but the segment push raced the abort).
+            const orphans = liveBuf.filter(
+              (c) => !completedIds.has(c.id) && !recoveredIds.has(c.id),
+            );
+            if (orphans.length > 0) {
+              const lastSeg = finalSegments[finalSegments.length - 1];
+              const targetSeg =
+                lastSeg?.type === "tools"
+                  ? lastSeg
+                  : (() => {
+                      const s: MessageSegment = { type: "tools", toolCallIds: [] };
+                      finalSegments.push(s);
+                      return s;
+                    })();
+              for (const live of orphans) {
+                targetSeg.toolCallIds.push(live.id);
+                completedCalls.push({
+                  id: live.id,
+                  name: live.toolName,
+                  args: live.args ? safeParseArgs(live.args) : {},
+                  result: { success: false, output: "", error: "Interrupted by user (Ctrl+X)" },
+                });
               }
             }
             abortedSegmentsSnapshot.current = [];

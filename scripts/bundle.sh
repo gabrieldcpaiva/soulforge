@@ -160,24 +160,18 @@ fi
 # the intelligence worker (code-splitting via dynamic imports of ts-morph,
 # tree-sitter, etc.). --outfile only accepts a single output file.
 #
-# --external marks native + binary assets that Bun would otherwise inline as
-# hash-named chunks. Two reasons:
-#   1. Homebrew's keg_relocate walks the keg looking for Mach-O dylibs to
-#      patch install names on. The hash-named .node files in deps/workers/
-#      have no header pad and fail relinking → broken brew install.
-#   2. shiki transitively pulls @opentui/core + ghostty-opentui for terminal
-#      rendering, but worker code paths never invoke that surface — only the
-#      pure-JS highlighter. Keep the native bits out.
-# Tree-sitter wasm grammars are resolved at runtime from ~/.soulforge/wasm.
+# --external is scoped to binary assets only (.node, .wasm, .scm). The TUI
+# packages (@opentui/core, ghostty-opentui, tree-sitter-wasms) used to be
+# externalised too as a workaround for 2.18.x where io.worker.ts pulled the
+# entire TUI tree via summarize.ts → provider-options.ts → src/index.tsx;
+# leftover require("@opentui/core") calls then crashed at worker startup with
+# "Worker has been terminated". The proper fix lives in the source — worker
+# handlers now import from leaf modules only (convo-text.ts, model-id.ts).
+# scripts/build.ts enforces this with a leak canary on the dist/ workers.
+# Tree-sitter wasm grammars are still resolved at runtime from ~/.soulforge/wasm.
 echo "    Bundling worker scripts..."
 mkdir -p "${DEPS_DIR}/workers"
 WORKER_EXTERNALS=(
-  --external "ghostty-opentui"
-  --external "ghostty-opentui/*"
-  --external "@opentui/core"
-  --external "@opentui/core/*"
-  --external "tree-sitter-wasms"
-  --external "tree-sitter-wasms/*"
   --external "*.node"
   --external "*.wasm"
   --external "*.scm"
@@ -192,6 +186,28 @@ bun build src/core/workers/io.worker.ts \
   --entry-naming "[name].[ext]" \
   --target=bun \
   "${WORKER_EXTERNALS[@]}"
+
+# Worker bundle leak canary — mirrors scripts/build.ts. The io worker must
+# stay TUI-free. The intelligence worker may use shiki/tree-sitter but never
+# the TUI. Failure here means a handler import chain re-poisoned the bundle
+# (see src/core/llm/model-id.ts + src/core/compaction/convo-text.ts).
+echo "    Verifying worker bundles are TUI-free..."
+LEAKS=""
+for needle in "src/index.tsx" "@opentui/core" "ghostty-opentui" "src/components/" "react/cjs/react.development"; do
+  if grep -q "$needle" "${DEPS_DIR}/workers/io.worker.js"; then
+    LEAKS="${LEAKS} io.worker.js→${needle}"
+  fi
+done
+for needle in "src/index.tsx" "@opentui/core" "ghostty-opentui" "src/components/"; do
+  if grep -q "$needle" "${DEPS_DIR}/workers/intelligence.worker.js"; then
+    LEAKS="${LEAKS} intelligence.worker.js→${needle}"
+  fi
+done
+if [[ -n "$LEAKS" ]]; then
+  echo "✗ worker bundle TUI leak detected:${LEAKS}" >&2
+  echo "  worker handlers must only import leaf modules — see scripts/build.ts canary." >&2
+  exit 1
+fi
 
 # Tree-sitter WASM runtime + grammars + OpenTUI syntax assets
 echo "    Bundling tree-sitter assets..."

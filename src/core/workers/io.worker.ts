@@ -104,7 +104,7 @@ const handlers: Record<string, (...args: unknown[]) => unknown> = {
   },
 
   buildConvoText: async (messages: unknown, charBudget: unknown) => {
-    const { buildFullConvoText } = await import("../compaction/summarize.js");
+    const { buildFullConvoText } = await import("../compaction/convo-text.js");
     type ModelMessage = import("ai").ModelMessage;
     return buildFullConvoText(messages as ModelMessage[], charBudget as number);
   },

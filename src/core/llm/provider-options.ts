@@ -1,7 +1,19 @@
 import type { ProviderOptions } from "@ai-sdk/provider-utils";
 import type { AppConfig, ContextManagementConfig, EffortLevel } from "../../types/index.js";
+import {
+  extractBaseModel as _leafExtractBaseModel,
+  getModelId as _leafGetModelId,
+  parseOpusVersion as _leafParseOpusVersion,
+  supportsTemperature as _leafSupportsTemperature,
+} from "./model-id.js";
 import { getModelContextWindow } from "./models.js";
 import { getProvider } from "./providers/index.js";
+
+const parseOpusVersion = _leafParseOpusVersion;
+
+export const extractBaseModel = _leafExtractBaseModel;
+export const getModelId = _leafGetModelId;
+export const supportsTemperature = _leafSupportsTemperature;
 
 interface ModelCapabilities {
   provider: "anthropic" | "openai" | "google" | "xai" | "deepseek" | "other";
@@ -155,11 +167,6 @@ function parseModelId(modelId: string): { provider: string; model: string } {
   const slash = modelId.indexOf("/");
   if (slash === -1) return { provider: "", model: modelId };
   return { provider: modelId.slice(0, slash), model: modelId.slice(slash + 1) };
-}
-
-export function extractBaseModel(modelId: string): string {
-  const slash = modelId.lastIndexOf("/");
-  return (slash >= 0 ? modelId.slice(slash + 1) : modelId).toLowerCase();
 }
 
 type ClaudeGen = "legacy" | "3.5" | "4+" | "non-claude";
@@ -407,33 +414,6 @@ function getEffectiveCaps(modelId: string): EffectiveCaps {
 
 export function isAnthropicNative(modelId: string): boolean {
   return detectModelFamily(modelId) === "claude";
-}
-
-/** Extract model ID string from a LanguageModel (object with .modelId) or pass-through strings. */
-export function getModelId(model: unknown): string {
-  if (typeof model === "string") return model;
-  if (typeof model === "object" && model !== null && "modelId" in model) {
-    return String((model as { modelId: unknown }).modelId);
-  }
-  return "";
-}
-
-/** Parse opus major/minor version from a base model ID. Returns null if not an Opus model. */
-function parseOpusVersion(base: string): { major: number; minor: number } | null {
-  // Match both hyphen (4-7) and dot (4.7) conventions.
-  // Minor is 1-2 digits with negative lookahead to avoid matching date suffixes (e.g. opus-4-20250514).
-  const m = base.match(/opus-(?:(\d+)[.-](\d{1,2})(?!\d)|(\d+))/);
-  if (!m) return null;
-  return { major: Number(m[1] ?? m[3]), minor: m[2] ? Number(m[2]) : 0 };
-}
-
-/** Opus 4.7+ rejects temperature/top_p/top_k — return false for those models. */
-export function supportsTemperature(modelId: string): boolean {
-  const base = extractBaseModel(modelId);
-  if (!base.startsWith("claude")) return true;
-  const v = parseOpusVersion(base);
-  if (!v) return true;
-  return v.major < 5 && (v.major < 4 || v.minor < 7);
 }
 
 export function getSupportedClaudeEfforts(modelId: string): EffortLevel[] | null {

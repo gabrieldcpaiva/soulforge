@@ -1,6 +1,6 @@
 import stripAnsi from "strip-ansi";
 import type { ToolResult } from "../../types";
-import { spawnShell } from "../platform/index.js";
+import { killTree, spawnShell } from "../platform/index.js";
 import { isForbidden } from "../security/forbidden.js";
 // TODO(beta): inline image rendering — disabled until suspend/resume bridge is stable
 // import { canRenderImages, renderImages } from "../terminal/image.js";
@@ -38,6 +38,7 @@ async function runPreCommitChecks(cwd: string): Promise<string | null> {
   }
   if (!lintCmd) return null;
 
+  const LINT_TIMEOUT_MS = 15_000;
   try {
     const { exitCode, stdout, stderr } = await new Promise<{
       exitCode: number | null;
@@ -47,12 +48,36 @@ async function runPreCommitChecks(cwd: string): Promise<string | null> {
       const chunks: string[] = [];
       const errChunks: string[] = [];
       let lintBytes = 0;
+      let settled = false;
       const proc = spawnShell(lintCmd, {
         cwd,
-        timeout: 15_000,
         env: buildSafeEnv(),
         ...SAFE_SPAWN_OPTS,
       });
+      const finish = (result: { exitCode: number | null; stdout: string; stderr: string }) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(killTimer);
+        clearTimeout(forceKillTimer);
+        resolve(result);
+      };
+      const killProc = (signal: "SIGTERM" | "SIGKILL") => {
+        if (typeof proc.pid === "number") killTree(proc.pid, signal);
+        else {
+          try {
+            proc.kill(signal);
+          } catch {}
+        }
+      };
+      const killTimer = setTimeout(() => killProc("SIGTERM"), LINT_TIMEOUT_MS);
+      const forceKillTimer = setTimeout(() => {
+        killProc("SIGKILL");
+        finish({
+          exitCode: null,
+          stdout: chunks.join(""),
+          stderr: `Pre-commit lint timed out after ${String(LINT_TIMEOUT_MS / 1000)}s`,
+        });
+      }, LINT_TIMEOUT_MS + 3_000);
       proc.stdout?.on("data", (d: Buffer) => {
         lintBytes += d.length;
         if (lintBytes <= MAX_COLLECT_BYTES) chunks.push(d.toString());
@@ -62,9 +87,9 @@ async function runPreCommitChecks(cwd: string): Promise<string | null> {
         if (lintBytes <= MAX_COLLECT_BYTES) errChunks.push(d.toString());
       });
       proc.on("close", (code) =>
-        resolve({ exitCode: code, stdout: chunks.join(""), stderr: errChunks.join("") }),
+        finish({ exitCode: code, stdout: chunks.join(""), stderr: errChunks.join("") }),
       );
-      proc.on("error", () => resolve({ exitCode: 1, stdout: "", stderr: "lint process error" }));
+      proc.on("error", () => finish({ exitCode: 1, stdout: "", stderr: "lint process error" }));
     });
 
     if (exitCode !== 0) {
@@ -319,25 +344,50 @@ export const shellTool = {
       const errChunks: string[] = [];
       let stdoutBytes = 0;
       let stderrBytes = 0;
+      let settled = false;
+      let timedOut = false;
 
       const proc = spawnShell(command, {
         cwd,
-        timeout,
         env: buildSafeEnv(),
         ...SAFE_SPAWN_OPTS,
       });
 
+      const killChildTree = (signal: "SIGTERM" | "SIGKILL") => {
+        if (typeof proc.pid === "number") {
+          killTree(proc.pid, signal);
+        } else {
+          try {
+            proc.kill(signal);
+          } catch {}
+        }
+      };
+
+      const hardKillTimer = setTimeout(() => {
+        if (settled) return;
+        timedOut = true;
+        killChildTree("SIGTERM");
+        setTimeout(() => {
+          if (settled) return;
+          killChildTree("SIGKILL");
+          setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            cleanupAbortListener?.();
+            resolve({
+              success: false,
+              output: sanitizeOutput(chunks.join("")),
+              error: `Command timed out after ${String(timeout / 1000)}s and could not be terminated (possible stuck process tree)`,
+            });
+          }, 2000);
+        }, 3000);
+      }, timeout);
+
       let cleanupAbortListener: (() => void) | undefined;
       if (abortSignal) {
         const onAbort = () => {
-          try {
-            proc.kill("SIGTERM");
-          } catch {}
-          setTimeout(() => {
-            try {
-              proc.kill("SIGKILL");
-            } catch {}
-          }, 500);
+          killChildTree("SIGTERM");
+          setTimeout(() => killChildTree("SIGKILL"), 500);
         };
         if (abortSignal.aborted) {
           onAbort();
@@ -357,6 +407,9 @@ export const shellTool = {
       });
 
       proc.on("close", async (code: number | null) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(hardKillTimer);
         cleanupAbortListener?.();
         let raw = sanitizeOutput(chunks.join(""));
         if (stdoutBytes > MAX_COLLECT_BYTES) {
@@ -381,6 +434,15 @@ export const shellTool = {
           stdout = text;
         }
 
+        if (timedOut) {
+          resolve({
+            success: false,
+            output: stdout || stderr,
+            error: `Command timed out after ${String(timeout / 1000)}s. If this command is expected to take longer and is not waiting for interactive input, retry with a larger timeout value in milliseconds.`,
+          });
+          return;
+        }
+
         if (code === 0) {
           const hint = detectReadCommand(command) ?? detectProjectCommand(command);
           const output = hint ? `${stdout || stderr}\n\n${hint}` : stdout || stderr;
@@ -389,7 +451,7 @@ export const shellTool = {
           resolve({
             success: false,
             output: stdout || stderr,
-            error: `Command timed out after ${String(timeout / 1000)}s`,
+            error: `Command terminated by signal after ${String(timeout / 1000)}s`,
           });
         } else {
           resolve({
@@ -401,6 +463,10 @@ export const shellTool = {
       });
 
       proc.on("error", (err: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(hardKillTimer);
+        cleanupAbortListener?.();
         resolve({ success: false, output: err.message, error: err.message });
       });
     });

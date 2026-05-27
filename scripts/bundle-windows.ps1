@@ -111,16 +111,14 @@ try {
     # Use --outdir + --entry-naming because Bun may emit multiple chunks for
     # the intelligence worker (code-splitting via dynamic imports of ts-morph,
     # tree-sitter, etc.). --outfile only accepts a single output file.
-    # --external keeps native + binary assets out of the bundle (see
-    # bundle.sh for rationale — same hash-named .node + .scm + .wasm fan-out).
+    #
+    # --external is scoped to binary asset extensions only. TUI packages USED
+    # to be externalised here too as a 2.18.x workaround; that left unresolved
+    # require("@opentui/core") calls in the worker JS which crashed at startup
+    # with "Worker has been terminated". The real fix is in the source — see
+    # bundle.sh comment + scripts/build.ts leak canary for context.
     $workersDir = Join-Path $depsDir "workers"
     $workerExternals = @(
-        "--external", "ghostty-opentui",
-        "--external", "ghostty-opentui/*",
-        "--external", "@opentui/core",
-        "--external", "@opentui/core/*",
-        "--external", "tree-sitter-wasms",
-        "--external", "tree-sitter-wasms/*",
         "--external", "*.node",
         "--external", "*.wasm",
         "--external", "*.scm"
@@ -138,6 +136,28 @@ try {
         @workerExternals
     if ($LASTEXITCODE -ne 0) { throw "io worker bundle failed" }
     Write-Host "    OK workers"
+
+    # Worker bundle leak canary — mirrors scripts/build.ts + scripts/bundle.sh.
+    # Drop a TUI import into a worker handler chain and this fails.
+    $ioBundlePath = Join-Path $workersDir "io.worker.js"
+    $intelBundlePath = Join-Path $workersDir "intelligence.worker.js"
+    $ioBundle = Get-Content $ioBundlePath -Raw
+    $intelBundle = Get-Content $intelBundlePath -Raw
+    $ioForbidden = @("src/index.tsx", "@opentui/core", "ghostty-opentui", "src/components/", "react/cjs/react.development")
+    $intelForbidden = @("src/index.tsx", "@opentui/core", "ghostty-opentui", "src/components/")
+    $leaks = @()
+    foreach ($n in $ioForbidden) {
+        if ($ioBundle.Contains($n)) { $leaks += "io.worker.js->$n" }
+    }
+    foreach ($n in $intelForbidden) {
+        if ($intelBundle.Contains($n)) { $leaks += "intelligence.worker.js->$n" }
+    }
+    if ($leaks.Count -gt 0) {
+        Write-Host "X worker bundle TUI leak: $($leaks -join ', ')" -ForegroundColor Red
+        Write-Host "  worker handlers must only import leaf modules - see scripts/build.ts canary." -ForegroundColor Red
+        throw "worker bundle leak canary failed"
+    }
+    Write-Host "    OK worker leak canary"
 
     $wts = Join-Path $repoRoot "node_modules/web-tree-sitter"
     $wasmTargets = @((Join-Path $wts "tree-sitter.wasm"), (Join-Path $wts "web-tree-sitter.wasm"))

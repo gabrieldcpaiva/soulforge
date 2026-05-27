@@ -212,12 +212,12 @@ export async function getGitLog(cwd: string, count = 10): Promise<GitLogEntry[]>
   );
   if (!ok) return [];
   const lines = stdout.trim().split("\n").filter(Boolean);
-  try {
-    const { getIOClient } = await import("../workers/io-client.js");
-    return await getIOClient().parseGitLogBatch(lines);
-  } catch {
-    return lines.map(parseGitLogLine);
-  }
+  // NOTE: this used to offload to the IO worker via dynamic import of
+  // io-client.js — that pulled the worker store + zustand + React into
+  // the worker bundle and produced a self-referential loop when the
+  // worker called getGitLog itself. Always parse inline; parseGitLogLine
+  // is a regex match, cheap enough for the main thread.
+  return lines.map(parseGitLogLine);
 }
 
 export async function gitInit(cwd: string): Promise<boolean> {

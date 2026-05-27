@@ -870,14 +870,36 @@ export const projectTool = {
         env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1", ...args.env },
       });
       const timeoutMs = args.timeout ?? getToolTimeoutMs();
-      const timer = timeoutMs > 0 ? setTimeout(() => proc.kill(), timeoutMs) : null;
-      const [stdout, stderr] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-      ]);
-      const exitCode = await proc.exited;
-      if (timer) clearTimeout(timer);
-      return { stdout, stderr, exitCode };
+      let timedOut = false;
+      const killProc = (signal: number | NodeJS.Signals = "SIGTERM") => {
+        try {
+          proc.kill(signal);
+        } catch {}
+      };
+      const softTimer =
+        timeoutMs > 0
+          ? setTimeout(() => {
+              timedOut = true;
+              killProc("SIGTERM");
+            }, timeoutMs)
+          : null;
+      const hardTimer =
+        timeoutMs > 0 ? setTimeout(() => killProc("SIGKILL"), timeoutMs + 3000) : null;
+      try {
+        const [stdout, stderr, exitCode] = await Promise.all([
+          new Response(proc.stdout).text(),
+          new Response(proc.stderr).text(),
+          proc.exited,
+        ]);
+        return {
+          stdout,
+          stderr,
+          exitCode: timedOut ? null : exitCode,
+        };
+      } finally {
+        if (softTimer) clearTimeout(softTimer);
+        if (hardTimer) clearTimeout(hardTimer);
+      }
     };
 
     // "check" runs typecheck + lint + test in parallel, reports all results
@@ -1040,11 +1062,24 @@ export async function formatFile(filePath: string, cwd?: string): Promise<boolea
       stderr: "pipe",
       env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
     });
-    const timer = setTimeout(() => proc.kill(), 10_000);
-    await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
-    const exitCode = await proc.exited;
-    clearTimeout(timer);
-    return exitCode === 0;
+    const killProc = (signal: number | NodeJS.Signals = "SIGTERM") => {
+      try {
+        proc.kill(signal);
+      } catch {}
+    };
+    const softTimer = setTimeout(() => killProc("SIGTERM"), 10_000);
+    const hardTimer = setTimeout(() => killProc("SIGKILL"), 13_000);
+    try {
+      const [, , exitCode] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+      return exitCode === 0;
+    } finally {
+      clearTimeout(softTimer);
+      clearTimeout(hardTimer);
+    }
   } catch {
     return false;
   }
