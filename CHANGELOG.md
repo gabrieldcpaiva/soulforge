@@ -2,6 +2,19 @@
 
 All notable changes to SoulForge are documented here.
 
+## [2.18.6] — 2026-05-30
+
+### Bug Fixes
+
+- **providers**: pin gpt-5.5 context to 272k for codex/proxy
+- **stream**: match orphan tool-results against all prior assistants
+- **stream**: drop orphaned tool-result blocks from provider-executed tool-calls
+- **useChat,dispatch**: inline stall-retry backoff + return DispatchOutput on single-agent failure
+- incremental context compression — correct token tracking, add ea… (#78)
+### Miscellaneous
+
+- **context**: drop redundant `= undefined` init on lastInstructionsSize
+- **useChat**: rewrite stale stall-retry comment after inline-backoff rewrite
 ## [2.18.5] — 2026-05-30
 
 ### Bug Fixes
