@@ -417,6 +417,114 @@ describe("sanitizeMessages", () => {
     expect(content[0].type).toBe("text");
   });
 
+  it("drops cross-message orphan tool-result whose toolCallId has no matching tool-call in preceding assistant", () => {
+    const messages = [
+      { role: "user" as const, content: "hello" },
+      {
+        role: "assistant" as const,
+        content: [
+          { type: "tool-call" as const, toolCallId: "call_1", toolName: "read", input: { path: "a.ts" } },
+        ],
+      },
+      {
+        role: "tool" as const,
+        content: [
+          { type: "tool-result" as const, toolCallId: "call_1", toolName: "read", output: { type: "text" as const, value: "ok" } },
+          { type: "tool-result" as const, toolCallId: "call_ORPHAN", toolName: "shell", output: { type: "text" as const, value: "stray" } },
+        ],
+      },
+    ] as unknown as Parameters<typeof sanitizeMessages>[0];
+    const result = sanitizeMessages(messages);
+    expect(result).not.toBe(messages);
+    expect(result).toHaveLength(3);
+    const toolMsg = result[2] as { content: Array<{ toolCallId: string }> };
+    expect(toolMsg.content).toHaveLength(1);
+    expect(toolMsg.content[0].toolCallId).toBe("call_1");
+  });
+
+  it("removes entire tool message when all tool-results are orphaned", () => {
+    const messages = [
+      { role: "user" as const, content: "hello" },
+      { role: "assistant" as const, content: "Continuing." },
+      {
+        role: "tool" as const,
+        content: [
+          { type: "tool-result" as const, toolCallId: "call_GONE", toolName: "read", output: { type: "text" as const, value: "orphan" } },
+        ],
+      },
+    ] as unknown as Parameters<typeof sanitizeMessages>[0];
+    const result = sanitizeMessages(messages);
+    expect(result).toHaveLength(2);
+    expect(result[0]).toEqual({ role: "user", content: "hello" });
+    expect(result[1]).toEqual({ role: "assistant", content: "Continuing." });
+  });
+
+  it("preserves tool message when all tool-results match preceding assistant tool-calls", () => {
+    const messages = [
+      {
+        role: "assistant" as const,
+        content: [
+          { type: "tool-call" as const, toolCallId: "call_A", toolName: "read", input: { path: "x.ts" } },
+        ],
+      },
+      {
+        role: "tool" as const,
+        content: [
+          { type: "tool-result" as const, toolCallId: "call_A", toolName: "read", output: { type: "text" as const, value: "content" } },
+        ],
+      },
+    ] as unknown as Parameters<typeof sanitizeMessages>[0];
+    const result = sanitizeMessages(messages);
+    expect(result).toBe(messages);
+  });
+
+  it("does not treat provider-executed tool-result in tool message as valid (drops it)", () => {
+    // Reproduces the exact bug from diagnostic: code_execution (providerExecuted=true)
+    // has its result inline in the assistant message, but a synthetic "Interrupted" result
+    // also ends up in the tool message. The reverse pass should drop it.
+    const messages = [
+      { role: "user" as const, content: "do something" },
+      {
+        role: "assistant" as const,
+        content: [
+          { type: "text" as const, text: "Let me check." },
+          {
+            type: "tool-call" as const,
+            toolCallId: "srvtoolu_ABC",
+            toolName: "code_execution",
+            input: { code: "print(1)" },
+            providerExecuted: true,
+          },
+          {
+            type: "tool-result" as const,
+            toolCallId: "srvtoolu_ABC",
+            toolName: "code_execution",
+            output: { type: "error-json" as const, value: { errorCode: "too_many_requests" } },
+          },
+          {
+            type: "tool-call" as const,
+            toolCallId: "toolu_123",
+            toolName: "shell",
+            input: { command: "echo hi" },
+          },
+        ],
+      },
+      {
+        role: "tool" as const,
+        content: [
+          { type: "tool-result" as const, toolCallId: "toolu_123", toolName: "shell", output: { type: "text" as const, value: "hi" } },
+          { type: "tool-result" as const, toolCallId: "srvtoolu_ABC", toolName: "code_execution", output: { type: "text" as const, value: "Interrupted — no result recorded." } },
+        ],
+      },
+    ] as unknown as Parameters<typeof sanitizeMessages>[0];
+    const result = sanitizeMessages(messages);
+    expect(result).not.toBe(messages);
+    expect(result).toHaveLength(3);
+    const toolMsg = result[2] as { content: Array<{ toolCallId: string }> };
+    expect(toolMsg.content).toHaveLength(1);
+    expect(toolMsg.content[0].toolCallId).toBe("toolu_123");
+  });
+
   it("non-provider-executed tool-call without result is preserved (client tool — result lives in next user msg)", () => {
     const messages = [
       {

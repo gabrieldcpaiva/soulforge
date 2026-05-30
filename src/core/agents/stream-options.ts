@@ -2,24 +2,6 @@ import type { LanguageModelV3ToolCall } from "@ai-sdk/provider";
 import type { ModelMessage } from "ai";
 import { jsonrepair } from "jsonrepair";
 
-/**
- * Sanitize messages for Anthropic API replay.
- *
- * 1. Tool-call inputs: when the model generates malformed args (unparseable JSON or
- *    a non-object like a string/array/number), the AI SDK stores the raw value as
- *    `input` and marks the call `invalid`. Anthropic requires `tool_use.input` to be
- *    a dictionary, otherwise:
- *      "messages.N.content.M.tool_use.input: Input should be a valid dictionary"
- *
- * 2. Orphan server-tool blocks: Anthropic's server-side tools (bash_code_execution,
- *    code_execution, web_fetch, web_search) emit BOTH the tool_use and matching
- *    tool_result inline on the SAME assistant message. If the stream is cancelled
- *    or errors before the result block arrives, the assistant message contains a
- *    provider-executed tool_use with no paired tool_result. On replay Anthropic
- *    rejects with:
- *      "tool use ... was found without a corresponding tool_result block"
- *    We drop the unpaired tool_use (and any orphan tool_result) here.
- */
 export function sanitizeMessages(messages: ModelMessage[]): ModelMessage[] {
   let dirty = false;
   const cleaned = messages.map((msg) => {
@@ -81,7 +63,45 @@ export function sanitizeMessages(messages: ModelMessage[]): ModelMessage[] {
     return { ...msg, content };
   });
 
-  return dirty ? cleaned : messages;
+  // Pass 2: cross-message pairing — drop tool-result blocks in "tool" messages
+  // whose toolCallId has no matching tool-call in the preceding assistant message.
+  // This prevents "unexpected tool_use_id found in tool_result blocks" after
+  // compaction or session restore drops the assistant that owned them.
+  const result = dirty ? cleaned : [...messages];
+  for (let i = result.length - 1; i >= 0; i--) {
+    const msg = result[i];
+    if (!msg || msg.role !== "tool" || !Array.isArray(msg.content)) continue;
+    const prev = result[i - 1];
+    const validCallIds = new Set<string>();
+    if (prev?.role === "assistant" && Array.isArray(prev.content)) {
+      for (const p of prev.content) {
+        // biome-ignore lint/suspicious/noExplicitAny: structural check
+        const part = p as any;
+        if (
+          part?.type === "tool-call" &&
+          typeof part.toolCallId === "string" &&
+          !part.providerExecuted
+        ) {
+          validCallIds.add(part.toolCallId);
+        }
+      }
+    }
+    const filtered = msg.content.filter((p) => {
+      // biome-ignore lint/suspicious/noExplicitAny: structural check
+      const part = p as any;
+      if (part?.type !== "tool-result") return true;
+      return validCallIds.has(part.toolCallId);
+    });
+    if (filtered.length === 0) {
+      result.splice(i, 1);
+      dirty = true;
+    } else if (filtered.length !== msg.content.length) {
+      result[i] = { ...msg, content: filtered };
+      dirty = true;
+    }
+  }
+
+  return dirty ? result : messages;
 }
 
 /** prepareStep hook that sanitizes tool-call inputs and surfaces abnormal finishes

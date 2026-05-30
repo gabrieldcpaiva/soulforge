@@ -1790,8 +1790,16 @@ export function useChat({
         if (!m) continue;
         sanitized.push(m);
         if (m.role !== "assistant" || !Array.isArray(m.content)) continue;
+        // Only collect non-provider-executed tool-calls. Provider-executed tools
+        // (code_execution, web_fetch, etc.) have their tool-result inline in the
+        // same assistant message — synthesizing a duplicate in the tool message
+        // causes "unexpected tool_use_id found in tool_result blocks".
         const callParts = m.content.filter(
-          (p): p is ToolCallPart => typeof p === "object" && "type" in p && p.type === "tool-call",
+          (p): p is ToolCallPart =>
+            typeof p === "object" &&
+            "type" in p &&
+            p.type === "tool-call" &&
+            !(p as unknown as { providerExecuted?: boolean }).providerExecuted,
         );
         if (callParts.length === 0) continue;
         const next = sanitizedPre[i + 1];
@@ -1815,6 +1823,42 @@ export function useChat({
           next.content = [...next.content, ...synthetic];
         } else {
           sanitized.push({ role: "tool" as const, content: synthetic });
+        }
+      }
+      // Reverse pass: drop tool-result blocks whose toolCallId has no matching
+      // tool-call in the preceding assistant message. This prevents Anthropic's
+      // "unexpected tool_use_id found in tool_result blocks" rejection after
+      // compaction or session restore drops the assistant message that owned them.
+      for (let i = sanitized.length - 1; i >= 0; i--) {
+        const msg = sanitized[i];
+        if (!msg || msg.role !== "tool" || !Array.isArray(msg.content)) continue;
+        const prev = sanitized[i - 1];
+        const validCallIds = new Set<string>();
+        if (prev?.role === "assistant" && Array.isArray(prev.content)) {
+          for (const p of prev.content) {
+            if (
+              typeof p === "object" &&
+              "type" in p &&
+              (p as { type: string }).type === "tool-call" &&
+              !(p as { providerExecuted?: boolean }).providerExecuted
+            ) {
+              validCallIds.add((p as { toolCallId: string }).toolCallId);
+            }
+          }
+        }
+        const filtered = msg.content.filter((p) => {
+          if (
+            typeof p !== "object" ||
+            !("type" in p) ||
+            (p as { type: string }).type !== "tool-result"
+          )
+            return true;
+          return validCallIds.has((p as { toolCallId: string }).toolCallId);
+        });
+        if (filtered.length === 0) {
+          sanitized.splice(i, 1);
+        } else if (filtered.length !== msg.content.length) {
+          sanitized[i] = { ...msg, content: filtered };
         }
       }
       const newCoreMessages: ModelMessage[] = [...sanitized, userCoreMsg];
