@@ -3700,12 +3700,11 @@ export function useChat({
             setStreamingChars(0);
             setStreamSegments([]);
             setLiveToolCalls([]);
-            // Signal that a stall retry is pending so:
-            // 1. finally block doesn't fire competing handleSubmit (messageQueue/compact)
-            // 2. next handleSubmit("Continue.") preserves the retry count
+            // Gate the finally block: skip setIsLoading(false), Stop hook, and
+            // messageQueue/compact dispatch while a retry is in flight. Reset at
+            // the top of the next loop iteration (line 2112).
             stallRetryPendingRef.current = true;
-            // Backoff: 2s first, 5s second (use await so the finally block runs cleanly
-            // before we re-enter the retry loop with fresh state).
+            // Backoff: 2s first, 5s second.
             const backoffMs = stallRetryCountRef.current === 1 ? 2_000 : 5_000;
             await new Promise((resolve) => setTimeout(resolve, backoffMs));
             continue;
