@@ -1,13 +1,17 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { LanguageModel, ModelMessage } from "ai";
+import { normalizePath } from "../core/agents/agent-bus.js";
 import { createForgeAgent } from "../core/agents/index.js";
+import type { SharedCacheRef } from "../core/agents/subagent-tools.js";
 import { ContextManager } from "../core/context/manager.js";
 import { resolveModel } from "../core/llm/provider.js";
 import { buildProviderOptions } from "../core/llm/provider-options.js";
 import { disposeMCPManager } from "../core/mcp/index.js";
 import { SessionManager } from "../core/sessions/manager.js";
-import type { AppConfig, ChatMessage, ForgeMode } from "../types/index.js";
+import { onFileEdited } from "../core/tools/file-events.js";
+import { logBackgroundError } from "../stores/errors.js";
+import type { AppConfig, ChatMessage, ForgeMode, InteractiveCallbacks } from "../types/index.js";
 import { DIM, EXIT_ABORT, EXIT_ERROR, EXIT_OK, EXIT_TIMEOUT, PURPLE, RST } from "./constants.js";
 import {
   formatDuration,
@@ -33,6 +37,7 @@ interface AgentEnv {
   repoMap: ReturnType<ContextManager["getRepoMap"]> | undefined;
   providerOptions: Record<string, unknown>;
   headers: Record<string, string> | undefined;
+  sharedCacheRef: SharedCacheRef;
 }
 
 /**
@@ -58,6 +63,9 @@ async function setupAgent(
     quiet?: boolean;
     json?: boolean;
     events?: boolean;
+    callbacks?: InteractiveCallbacks;
+    onApproveOutsideCwd?: (toolName: string, path: string) => Promise<boolean>;
+    onApproveDestructive?: (description: string) => Promise<boolean>;
   },
   merged: AppConfig,
 ): Promise<AgentEnv> {
@@ -122,11 +130,68 @@ async function setupAgent(
     await getMCPManager().connectAll(merged.mcpServers);
   }
 
+  // Resolve subagent + web-search models from the task router (parity with TUI).
+  const tr = merged.taskRouter;
+  const sparkModelId = tr?.spark ?? tr?.exploration ?? tr?.trivial ?? undefined;
+  const emberModelId = tr?.ember ?? tr?.coding ?? undefined;
+  const webSearchModelId = tr?.webSearch ?? undefined;
+  const desloppifyModelId = tr?.desloppify ?? undefined;
+  const verifyModelId = tr?.verify ?? undefined;
+  const tryResolve = (id: string | undefined): LanguageModel | undefined => {
+    if (!id) return undefined;
+    try {
+      return resolveModel(id);
+    } catch (err) {
+      logBackgroundError(
+        "headless:router-resolve",
+        `model "${id}" failed to resolve: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return undefined;
+    }
+  };
+  const subagentModels =
+    sparkModelId || emberModelId || desloppifyModelId || verifyModelId
+      ? {
+          spark: tryResolve(sparkModelId),
+          ember: tryResolve(emberModelId),
+          desloppify: tryResolve(desloppifyModelId),
+          verify: tryResolve(verifyModelId),
+        }
+      : undefined;
+  const webSearchEnabled = merged.webSearch !== false;
+  const webSearchModel = webSearchEnabled ? tryResolve(webSearchModelId) : undefined;
+
+  // Shared file cache so dispatch subagents and multi-turn chat see edits made
+  // earlier in the session (parity with useChat's sharedCacheRef).
+  const sharedCacheRef: SharedCacheRef = {
+    current: undefined,
+    updateFile(absPath: string, content: string) {
+      if (!sharedCacheRef.current) return;
+      const prefix = cwd.endsWith("/") ? cwd : `${cwd}/`;
+      const rel = absPath.startsWith(prefix) ? absPath.slice(prefix.length) : absPath;
+      const key = normalizePath(rel);
+      sharedCacheRef.current.files.set(key, content);
+      for (const k of sharedCacheRef.current.toolResults.keys()) {
+        if (k.includes(key)) sharedCacheRef.current.toolResults.delete(k);
+      }
+    },
+  };
+  onFileEdited((absPath, content) => sharedCacheRef.updateFile(absPath, content));
+
+  const callbacks = opts.callbacks;
+  // Non-interactive default: deny destructive ops and out-of-cwd writes unless a
+  // surface supplies a real approval hook. Auto mode bypasses these in createForgeAgent.
+  const denyApproval = async (): Promise<boolean> => false;
+  const onApproveOutsideCwd =
+    opts.onApproveOutsideCwd ?? (mode === "auto" ? undefined : denyApproval);
+  const onApproveDestructive =
+    opts.onApproveDestructive ?? (mode === "auto" ? undefined : denyApproval);
   const agent = createForgeAgent({
     model,
     fullModelId: modelId,
     contextManager,
     forgeMode: mode,
+    interactive: callbacks,
     editorIntegration: {
       diagnostics: false,
       symbols: false,
@@ -139,8 +204,16 @@ async function setupAgent(
       lspStatus: false,
       format: false,
     },
+    subagentModels,
+    webSearchModel,
+    onApproveWebSearch: webSearchEnabled ? callbacks?.onWebSearchApproval : undefined,
+    onApproveFetchPage: callbacks?.onFetchPageApproval,
+    onApproveOutsideCwd,
+    onApproveDestructive,
     providerOptions: providerOpts.providerOptions,
     headers: providerOpts.headers,
+    agentFeatures: merged.agentFeatures,
+    sharedCacheRef,
     cwd,
     disablePruning: !["subagents", "both"].includes(
       merged.contextManagement?.pruningTarget ?? "none",
@@ -158,6 +231,7 @@ async function setupAgent(
     repoMap,
     providerOptions: providerOpts.providerOptions,
     headers: providerOpts.headers,
+    sharedCacheRef,
   };
 }
 
