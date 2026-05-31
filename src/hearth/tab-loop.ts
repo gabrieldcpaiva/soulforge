@@ -12,8 +12,8 @@ import { randomUUID } from "node:crypto";
 import { runChat } from "../headless/run.js";
 import type { HeadlessChatOptions, HeadlessEvent } from "../headless/types.js";
 import type { AppConfig, ForgeMode, InteractiveCallbacks } from "../types/index.js";
-import type { ExternalChatId, Surface } from "./types.js";
 import { cancelRemoteCallbacksForTab } from "./bridge.js";
+import type { ExternalChatId, Surface } from "./types.js";
 
 /** Cap per-tab prompt queue so a flooding chat can't OOM the daemon. */
 const MAX_QUEUED_PROMPTS = 200;
