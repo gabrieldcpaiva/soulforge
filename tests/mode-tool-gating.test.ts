@@ -124,4 +124,19 @@ describe("buildModeMessage — cache-stable mode injection", () => {
     expect(a).not.toBe(b);
     expect(b).toContain("Active mode: CHALLENGE.");
   });
+
+  test("override wins over live state (frozen turn-mode, no mid-turn drift)", () => {
+    // The deny gate enforces the mode frozen at agent build. The banner must
+    // reflect that same frozen mode even if live state changed mid-turn.
+    const cm = new ContextManager(TMP);
+    cm.setForgeMode("default"); // live state = default
+    const msg = cm.buildModeMessage("architect"); // frozen = architect
+    expect(msg).toContain("Active mode: ARCHITECT.");
+  });
+
+  test("override default returns null even when live state is restricted", () => {
+    const cm = new ContextManager(TMP);
+    cm.setForgeMode("architect");
+    expect(cm.buildModeMessage("default")).toBeNull();
+  });
 });

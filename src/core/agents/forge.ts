@@ -96,7 +96,7 @@ function buildForgePrepareStep(
     buildSoulMapDiff(modelId?: string): string | null;
     hasSoulMapDiff?(): boolean;
     commitSoulMapDiff(): void;
-    buildModeMessage(): string | null;
+    buildModeMessage(modeOverride?: ForgeMode): string | null;
     buildSkillsBlock(): string | null;
     buildMemoryRecallMessages(
       lastUserMessage: string,
@@ -110,6 +110,11 @@ function buildForgePrepareStep(
   proxyInstructions?: string,
   cacheOpts: ProviderOptions = EPHEMERAL_CACHE,
   modelId?: string,
+  /** Mode frozen at agent-build time. The execution-time deny gate enforces
+   *  this exact mode for the whole turn, so the injected mode banner must
+   *  reflect it too — not live contextManager state, which can drift mid-turn
+   *  on steering. A mode change takes effect on the next turn's agent rebuild. */
+  frozenMode: ForgeMode = "default",
 ) {
   // Cache-stable inject tracking: the ToolLoopAgent discards prepareStep message
   // modifications after each step (it rebuilds from initialMessages + responseMessages).
@@ -135,10 +140,11 @@ function buildForgePrepareStep(
 
   // Mode injection state: the active-mode reminder is appended as a cache-stable
   // user message (NOT the system prompt) so mode switches don't break the system
-  // cache prefix (discussion #85, source #1). We emit it once on the first step
-  // and again only when the mode string actually changes. `undefined` = never
-  // emitted yet; `null` = last emitted state was default (no banner).
-  let lastEmittedMode: string | null | undefined = undefined;
+  // cache prefix (discussion #85, source #1). Latch keys on the mode NAME so a
+  // context-threshold re-render of plan instructions doesn't re-inject. We emit
+  // once on the first step, then only when the name changes. `undefined` = never
+  // emitted yet.
+  let lastEmittedMode: ForgeMode | undefined;
 
   // Commit-boundary nudge: recomputed fresh every step from message history (no closure state).
 
@@ -237,18 +243,20 @@ function buildForgePrepareStep(
     }
 
     // ── Active-mode injection ────────────────────────────────────────
-    // Append the mode reminder as a cache-stable user message when the mode
-    // first appears or changes. Stable mode → no re-emit → byte-identical
-    // prefix. A switch back to default emits an explicit "default mode" note
-    // so the model sees prior restrictions lifted (the cached prefix never
-    // mentioned mode at all). Tools are always present in the schema; the
-    // execution-time gate in createForgeAgent enforces restrictions.
+    // Append the mode reminder as a cache-stable user message ONLY when the
+    // mode NAME actually changes. The latch keys on the mode name (stable),
+    // not the rendered text — plan mode renders different instructions as
+    // context grows (PLAN_LIGHT ≤50% → PLAN_FULL >50%), and keying on the
+    // text would re-inject mid-session on a threshold cross the user never
+    // triggered. A switch back to default emits an explicit "restrictions
+    // lifted" note. Tools are always in the schema; the execution-time gate
+    // in createForgeAgent enforces restrictions. Stable mode → no re-emit →
+    // byte-identical prefix.
     if (contextManager) {
-      const modeMsg = contextManager.buildModeMessage();
-      const modeKey = modeMsg ?? "default";
-      if (modeKey !== lastEmittedMode) {
+      if (frozenMode !== lastEmittedMode) {
         const wasInitial = lastEmittedMode === undefined;
-        lastEmittedMode = modeKey;
+        lastEmittedMode = frozenMode;
+        const modeMsg = contextManager.buildModeMessage(frozenMode);
         if (modeMsg) {
           hints.push(modeMsg);
         } else if (!wasInitial) {

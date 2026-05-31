@@ -465,21 +465,13 @@ export class ContextManager {
     return Math.round((this.conversationTokens / window) * 100);
   }
 
-  /**
-   * Build the active-mode reminder for injection as a cache-stable user message
-   * (NOT the system prompt). Keeping mode out of the cached prefix means
-   * switching Architect → Plan → Implement no longer invalidates the system
-   * cache breakpoint (discussion #85, cache-break source #1). prepareStep
-   * appends this only when the mode changes, so a stable mode keeps the prefix
-   * byte-identical. Returns null for `default` — the absence of a mode line IS
-   * the default mode.
-   */
-  buildModeMessage(): string | null {
-    if (this.forgeMode === "default") return null;
-    const instructions = getModeInstructions(this.forgeMode, {
+  buildModeMessage(modeOverride?: ForgeMode): string | null {
+    const mode = modeOverride ?? this.forgeMode;
+    if (mode === "default") return null;
+    const instructions = getModeInstructions(mode, {
       contextPercent: this.getContextPercent(),
     });
-    const banner = `Active mode: ${this.forgeMode.toUpperCase()}.`;
+    const banner = `Active mode: ${mode.toUpperCase()}.`;
     return instructions ? `${banner}\n${instructions}` : banner;
   }
 
