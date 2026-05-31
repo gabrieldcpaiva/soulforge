@@ -66,11 +66,17 @@ describe("buildSystemPrompt assembly", () => {
     expect(withoutMap).not.toContain("<workflow>");
   });
 
-  test("mode overlay only present for non-default modes", () => {
+  test("mode overlay is NEVER baked into the cached system prompt (cache stability)", () => {
+    // Mode instructions moved to a cache-stable user-message inject in forge.ts
+    // (discussion #85, source #1). The system prompt must be byte-identical
+    // across modes so switching them never invalidates the cache breakpoint.
     const def = buildSystemPrompt(baseOpts({ forgeMode: "default" }));
     const arch = buildSystemPrompt(baseOpts({ forgeMode: "architect" }));
-    expect(def).not.toContain("ARCHITECT MODE");
-    expect(arch).toContain("ARCHITECT MODE");
+    const plan = buildSystemPrompt(baseOpts({ forgeMode: "plan" }));
+    expect(arch).not.toContain("ARCHITECT MODE");
+    expect(plan).not.toContain("PLAN MODE");
+    expect(arch).toBe(def);
+    expect(plan).toBe(def);
   });
 
   test("routes by model family — claude vs openai produce different prompts", () => {

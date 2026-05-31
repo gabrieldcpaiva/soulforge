@@ -23,7 +23,6 @@ import {
   GOOGLE_PROMPT,
   OPENAI_PROMPT,
 } from "./families/index.js";
-import { getModeInstructions } from "./modes/index.js";
 import { TOOL_GUIDANCE_NO_MAP, TOOL_GUIDANCE_WITH_MAP } from "./shared/index.js";
 
 export type { ModelFamily } from "../llm/provider-options.js";
@@ -120,11 +119,9 @@ export function buildSystemPrompt(opts: PromptBuilderOptions): string {
   // Project instructions (SOULFORGE.md, CLAUDE.md, etc.)
   if (opts.projectInstructions) parts.push(opts.projectInstructions);
 
-  // Mode overlay
-  const modeInstructions = getModeInstructions(opts.forgeMode, {
-    contextPercent: opts.contextPercent,
-  });
-  if (modeInstructions) parts.push(`Mode: ${modeInstructions}`);
+  // Mode overlay is NOT baked into the cached system prompt — it's injected as
+  // a cache-stable user message in prepareStep (forge.ts) so switching modes
+  // doesn't invalidate the system cache breakpoint (discussion #85, source #1).
 
   // 9. Skills reference (skills are injected as message pairs, not here)
   parts.push(

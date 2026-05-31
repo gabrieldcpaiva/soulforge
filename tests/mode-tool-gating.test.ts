@@ -85,3 +85,43 @@ describe("mode tool gating", () => {
     expect(defaultEdit?.execute).not.toBe(architectEdit?.execute);
   });
 });
+
+describe("buildModeMessage — cache-stable mode injection", () => {
+  test("default mode returns null (absence of banner = default)", () => {
+    const cm = new ContextManager(TMP);
+    cm.setForgeMode("default");
+    expect(cm.buildModeMessage()).toBeNull();
+  });
+
+  test("architect mode returns banner + instructions", () => {
+    const cm = new ContextManager(TMP);
+    cm.setForgeMode("architect");
+    const msg = cm.buildModeMessage();
+    expect(msg).toContain("Active mode: ARCHITECT.");
+    expect(msg).toContain("ARCHITECT MODE");
+  });
+
+  test("plan mode returns banner + plan instructions", () => {
+    const cm = new ContextManager(TMP);
+    cm.setForgeMode("plan");
+    const msg = cm.buildModeMessage();
+    expect(msg).toContain("Active mode: PLAN.");
+    expect(msg).toContain("PLAN MODE");
+  });
+
+  test("message is byte-stable for an unchanged mode", () => {
+    const cm = new ContextManager(TMP);
+    cm.setForgeMode("architect");
+    expect(cm.buildModeMessage()).toBe(cm.buildModeMessage());
+  });
+
+  test("message changes when mode changes", () => {
+    const cm = new ContextManager(TMP);
+    cm.setForgeMode("architect");
+    const a = cm.buildModeMessage();
+    cm.setForgeMode("challenge");
+    const b = cm.buildModeMessage();
+    expect(a).not.toBe(b);
+    expect(b).toContain("Active mode: CHALLENGE.");
+  });
+});

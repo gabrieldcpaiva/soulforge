@@ -96,6 +96,7 @@ function buildForgePrepareStep(
     buildSoulMapDiff(modelId?: string): string | null;
     hasSoulMapDiff?(): boolean;
     commitSoulMapDiff(): void;
+    buildModeMessage(): string | null;
     buildSkillsBlock(): string | null;
     buildMemoryRecallMessages(
       lastUserMessage: string,
@@ -131,6 +132,13 @@ function buildForgePrepareStep(
     pair: [ModelMessage, ModelMessage];
   }> = [];
   let lastUserTurnCount = 0;
+
+  // Mode injection state: the active-mode reminder is appended as a cache-stable
+  // user message (NOT the system prompt) so mode switches don't break the system
+  // cache prefix (discussion #85, source #1). We emit it once on the first step
+  // and again only when the mode string actually changes. `undefined` = never
+  // emitted yet; `null` = last emitted state was default (no banner).
+  let lastEmittedMode: string | null | undefined = undefined;
 
   // Commit-boundary nudge: recomputed fresh every step from message history (no closure state).
 
@@ -226,6 +234,31 @@ function buildForgePrepareStep(
 
     if (contextManager?.hasSoulMapDiff?.()) {
       soulMapDiff = contextManager.buildSoulMapDiff(modelId);
+    }
+
+    // ── Active-mode injection ────────────────────────────────────────
+    // Append the mode reminder as a cache-stable user message when the mode
+    // first appears or changes. Stable mode → no re-emit → byte-identical
+    // prefix. A switch back to default emits an explicit "default mode" note
+    // so the model sees prior restrictions lifted (the cached prefix never
+    // mentioned mode at all). Tools are always present in the schema; the
+    // execution-time gate in createForgeAgent enforces restrictions.
+    if (contextManager) {
+      const modeMsg = contextManager.buildModeMessage();
+      const modeKey = modeMsg ?? "default";
+      if (modeKey !== lastEmittedMode) {
+        const wasInitial = lastEmittedMode === undefined;
+        lastEmittedMode = modeKey;
+        if (modeMsg) {
+          hints.push(modeMsg);
+        } else if (!wasInitial) {
+          // Switched back to default from a restricted/named mode — tell the
+          // model restrictions are lifted (initial default needs no banner).
+          hints.push(
+            "Active mode: DEFAULT. Any prior mode restrictions are lifted — all tools are now available.",
+          );
+        }
+      }
     }
 
     // ── Memory recall injection ──────────────────────────────────────
