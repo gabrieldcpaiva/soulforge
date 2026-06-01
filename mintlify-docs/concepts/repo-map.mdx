@@ -1,16 +1,16 @@
 ---
-title: "The repo map"
+title: "The Soul Map"
 description: "Why SoulForge starts every turn already knowing your codebase."
 icon: "diagram-project"
 ---
 
-On startup, SoulForge scans your codebase and builds a graph — every file, symbol, and import edge. Then it ranks them so the most important stuff sits at the top of the system prompt.
+On startup, the repo-map engine scans your codebase and builds a graph — every file, symbol, and import edge — then ranks it. The rendered result, injected at the top of every prompt, is the **Soul Map**: what the agent actually sees.
 
 The agent never wastes a turn grepping for "where does auth live" — it already sees the map.
 
 ## What you see
 
-The map appears in every system prompt, looking like this:
+The Soul Map appears in every prompt, looking like this:
 
 ```
 src/services/auth/session.ts (→12)
@@ -47,7 +47,7 @@ Everything runs out of the box. If you want to tune it:
 | `repoMap` | `true` (default) or `false` to disable |
 | `semanticSummaries` | `"ast"` (fast, default), `"llm"` (one-line LLM descriptions), `"off"` |
 
-`/repo-map` opens the settings panel.
+`/repo-map` opens the settings panel (the `repoMap` config keys below tune the engine that builds the map).
 
 ## Skip the scan
 

@@ -8,8 +8,8 @@
  */
 import { walkDir } from "../../context/file-tree.js";
 
-const SOUL_MAP_DESCRIPTION = `This is the Soul Map — a live structural index of the entire codebase.
-It is rebuilt automatically after every edit using AST parsing (tree-sitter), PageRank file ranking, and git co-change analysis.
+const SOUL_MAP_DESCRIPTION = `This is the Soul Map — a live structural view of the entire codebase, rebuilt after every edit.
+It is ranked by importance, so the highest-impact files surface first.
 
 What each part means:
 - Files are ranked by importance (highest-impact files first)
