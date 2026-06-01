@@ -38,6 +38,7 @@ export const grepTool = {
       "--glob=!*.css.map",
       `--max-count=${String(args.maxCount ?? 50)}`,
       ...(glob ? ["--glob", glob] : []),
+      "--",
       pattern,
       searchPath,
     ];

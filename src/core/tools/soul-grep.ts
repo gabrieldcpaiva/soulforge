@@ -102,7 +102,7 @@ export const soulGrepTool = {
       if (count) {
         rgArgs.push("--count", "--with-filename");
         if (args.glob) rgArgs.push("--glob", args.glob);
-        rgArgs.push(pattern, searchPath);
+        rgArgs.push("--", pattern, searchPath);
         const result = await runCount(rgBin, rgArgs);
         return depRes ? annotateDepNoMatch(result, depRes) : result;
       }
@@ -110,7 +110,7 @@ export const soulGrepTool = {
       rgArgs.push("--line-number", "--with-filename");
       rgArgs.push(`--max-count=${String(args.maxCount ?? 50)}`);
       if (args.glob) rgArgs.push("--glob", args.glob);
-      rgArgs.push(pattern, searchPath);
+      rgArgs.push("--", pattern, searchPath);
       const result = await runSearch(rgBin, rgArgs);
       return depRes ? annotateDepNoMatch(result, depRes) : result;
     };
