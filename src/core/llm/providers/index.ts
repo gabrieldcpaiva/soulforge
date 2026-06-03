@@ -112,6 +112,13 @@ export function getProvider(id: string): ProviderDefinition | undefined {
   return providerMap.get(id);
 }
 
+const BUILTIN_PROVIDER_IDS = new Set(BUILTIN_PROVIDERS.map((p) => p.id));
+
+/** True for a built-in provider id (custom providers are suffixed "-custom"). */
+export function isBuiltinProvider(id: string): boolean {
+  return BUILTIN_PROVIDER_IDS.has(id);
+}
+
 export function getAllProviders(): ProviderDefinition[] {
   return allProviders;
 }

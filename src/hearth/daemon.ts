@@ -157,6 +157,16 @@ export class HearthDaemon {
 
     await this.startSocket();
 
+    try {
+      const { sendBeacon } = await import("../core/telemetry.js");
+      const { CURRENT_VERSION, detectInstallMethod } = await import("../core/version.js");
+      const { loadConfig } = await import("../config/index.js");
+      sendBeacon(
+        { surface: "hearth", version: CURRENT_VERSION, install: detectInstallMethod() },
+        loadConfig().telemetry,
+      );
+    } catch {}
+
     // Decide who owns surfaces: TUI wins if it holds the bridge lock.
     const tuiOwner = readBridgeOwner();
     this.tuiOwnerPid = tuiOwner && tuiOwner !== process.pid ? tuiOwner : null;

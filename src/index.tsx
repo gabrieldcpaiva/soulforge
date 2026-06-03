@@ -407,6 +407,30 @@ export async function start(opts: StartOptions): Promise<void> {
     }
   }
 
+  try {
+    const { sendBeacon, maybeShowTelemetryNotice } = await import("./core/telemetry.js");
+    const { detectModelFamily, telemetryModelInfo } = await import(
+      "./core/llm/provider-options.js"
+    );
+    const { CURRENT_VERSION, detectInstallMethod } = await import("./core/version.js");
+    const { loadConfig, saveGlobalConfig } = await import("./config/index.js");
+    const cfg = loadConfig();
+    maybeShowTelemetryNotice(cfg, () => saveGlobalConfig({ telemetryNoticeShown: true }));
+    const hasModel = cfg.defaultModel !== "none";
+    const info = hasModel ? telemetryModelInfo(cfg.defaultModel) : undefined;
+    sendBeacon(
+      {
+        surface: "tui",
+        version: CURRENT_VERSION,
+        install: detectInstallMethod(),
+        family: hasModel ? detectModelFamily(cfg.defaultModel) : undefined,
+        provider: info?.provider,
+        model: info?.model,
+      },
+      cfg.telemetry,
+    );
+  } catch {}
+
   opts.createRoot(r).render(<AppRoot opts={opts} />);
 }
 export function getActiveRenderer(): Awaited<ReturnType<typeof CreateCliRenderer>> | null {

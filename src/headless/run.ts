@@ -90,6 +90,28 @@ async function setupAgent(
   }
   const providerOpts = await buildProviderOptions(modelId, merged);
 
+  try {
+    const { sendBeacon, maybeShowTelemetryNotice } = await import("../core/telemetry.js");
+    const { detectModelFamily, telemetryModelInfo } = await import(
+      "../core/llm/provider-options.js"
+    );
+    const { CURRENT_VERSION, detectInstallMethod } = await import("../core/version.js");
+    const { saveGlobalConfig } = await import("../config/index.js");
+    maybeShowTelemetryNotice(merged, () => saveGlobalConfig({ telemetryNoticeShown: true }));
+    const info = telemetryModelInfo(modelId);
+    sendBeacon(
+      {
+        surface: "headless",
+        version: CURRENT_VERSION,
+        install: detectInstallMethod(),
+        family: detectModelFamily(modelId),
+        provider: info.provider,
+        model: info.model,
+      },
+      merged.telemetry,
+    );
+  } catch {}
+
   const repoMapDisabled =
     merged.repoMap === false || opts.noRepomap || process.env.SOULFORGE_NO_REPOMAP === "1";
   const contextManager = await ContextManager.createAsync(

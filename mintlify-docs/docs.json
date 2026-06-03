@@ -99,6 +99,7 @@
               "reference/commands",
               "reference/configuration",
               "reference/presets",
+            "reference/telemetry",
             "troubleshooting"
           ]
           }

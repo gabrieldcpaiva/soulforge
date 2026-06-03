@@ -8,7 +8,7 @@ import {
   supportsTemperature as _leafSupportsTemperature,
 } from "./model-id.js";
 import { getModelContextWindow } from "./models.js";
-import { getProvider } from "./providers/index.js";
+import { getProvider, isBuiltinProvider } from "./providers/index.js";
 
 const parseOpusVersion = _leafParseOpusVersion;
 const isAdaptiveOnly = _leafIsAdaptiveOnly;
@@ -416,6 +416,46 @@ function getEffectiveCaps(modelId: string): EffectiveCaps {
 
 export function isAnthropicNative(modelId: string): boolean {
   return detectModelFamily(modelId) === "claude";
+}
+
+/**
+ * Recognized PUBLIC model-name shapes. A base model is only reported when it
+ * matches one of these exactly (after lowercasing) — anything else collapses to
+ * "other". This is an ALLOW-LIST, not a sanitizer: it guarantees a free-form /
+ * custom model string (which can embed secrets, org or project names) can never
+ * reach the wire, even under a built-in provider. Patterns are deliberately
+ * tight: a known family prefix + only version/variant tokens.
+ */
+const TELEMETRY_MODEL_PATTERNS: RegExp[] = [
+  /^claude-[a-z]+-\d+(?:[.-]\d+)?(?:-\d{8})?$/, // claude-sonnet-4-5, claude-opus-4.7
+  /^gpt-[a-z0-9.]+(?:-[a-z0-9.]+)?$/, // gpt-5, gpt-4o, gpt-4.1-mini
+  /^o[1-9](?:-[a-z]+)?$/, // o1, o3-mini
+  /^gemini-[0-9.]+-[a-z]+(?:-[a-z0-9]+)?$/, // gemini-2.5-pro, gemini-3-flash
+  /^grok-[0-9]+(?:-[a-z]+)?$/, // grok-4, grok-3-mini
+  /^deepseek-[a-z]+(?:-[a-z0-9]+)?$/, // deepseek-chat, deepseek-reasoner
+];
+
+/**
+ * Anonymous, privacy-safe telemetry descriptor for a model id. Reuses the
+ * existing provider registry + model utils — no hardcoded provider list.
+ *   provider: built-in provider id, or "custom" (custom providers are suffixed
+ *             "-custom" by registerCustomProviders, so they bucket cleanly).
+ *   model:    the public base model name ONLY when the provider is built-in AND
+ *             the base name matches a recognized public-model pattern exactly.
+ *             Otherwise "other" — so a custom/free-form model string (which can
+ *             embed secrets, org, or project names) is NEVER sent, even under a
+ *             real provider prefix like "anthropic/<anything>".
+ */
+export function telemetryModelInfo(modelId: string): { provider: string; model: string } {
+  const slash = modelId.indexOf("/");
+  const rawProvider = slash >= 0 ? modelId.slice(0, slash) : "";
+  const builtin = isBuiltinProvider(rawProvider);
+  const provider = builtin ? rawProvider : "custom";
+
+  const base = extractBaseModel(modelId);
+  const known = builtin && TELEMETRY_MODEL_PATTERNS.some((re) => re.test(base));
+  const model = known ? base.slice(0, 32) : "other";
+  return { provider, model };
 }
 
 export function getSupportedClaudeEfforts(modelId: string): EffortLevel[] | null {

@@ -6,7 +6,9 @@ import {
   detectModelFamily,
   getSupportedClaudeEfforts,
   getSupportedEfforts,
+  telemetryModelInfo,
 } from "../src/core/llm/provider-options.js";
+import { registerCustomProviders } from "../src/core/llm/providers/index.js";
 import type { AppConfig } from "../src/types/index.js";
 import { getCompatReasoningBody } from "../src/core/llm/compat-reasoning.js";
 
@@ -427,5 +429,89 @@ describe("getCompatReasoningBody", () => {
   test("returns empty when no effort set", () => {
     const cfg = baseConfig();
     expect(getCompatReasoningBody("groq/qwen3-32b", cfg)).toEqual({});
+  });
+});
+
+describe("telemetryModelInfo (privacy-safe provider/model)", () => {
+  test("built-in provider + known model → exact names", () => {
+    expect(telemetryModelInfo("anthropic/claude-sonnet-4-5")).toEqual({
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+    });
+    expect(telemetryModelInfo("openai/gpt-5")).toEqual({ provider: "openai", model: "gpt-5" });
+    expect(telemetryModelInfo("google/gemini-2.5-pro")).toEqual({
+      provider: "google",
+      model: "gemini-2.5-pro",
+    });
+  });
+
+  test("gateway provider keeps gateway id, model name preserved", () => {
+    // llmgateway routing nested anthropic model — provider stays the gateway.
+    expect(telemetryModelInfo("llmgateway/claude-sonnet-4-6")).toEqual({
+      provider: "llmgateway",
+      model: "claude-sonnet-4-6",
+    });
+  });
+
+  test("custom provider buckets to 'custom' and model to 'other' — no leak", () => {
+    registerCustomProviders([
+      {
+        id: "mycorp",
+        name: "MyCorp Internal",
+        baseURL: "https://llm.mycorp.internal/v1",
+        models: [{ id: "mycorp-secret-model-v3" }],
+      },
+    ] as never);
+    // Custom providers are suffixed "-custom" by the registry.
+    const info = telemetryModelInfo("mycorp-custom/mycorp-secret-model-v3");
+    expect(info.provider).toBe("custom");
+    expect(info.model).toBe("other");
+    // The private model/provider name must NOT appear anywhere.
+    expect(JSON.stringify(info)).not.toContain("mycorp");
+    expect(JSON.stringify(info)).not.toContain("secret");
+  });
+
+  test("unknown bare provider → custom, unknown model → other", () => {
+    const info = telemetryModelInfo("weirdprovider/some-private-thing");
+    expect(info.provider).toBe("custom");
+    expect(info.model).toBe("other");
+  });
+
+  test("model name is sanitized to safe charset + length", () => {
+    const info = telemetryModelInfo("openai/gpt-5");
+    expect(info.model).toMatch(/^[a-z0-9.\-]{1,32}$/);
+  });
+
+  test("built-in provider + FREE-FORM model → 'other' (no smuggling)", () => {
+    // A real provider prefix must NOT let an arbitrary model string through.
+    // These all carry potential secrets / org / project names.
+    const adversarial = [
+      "anthropic/claude AAA-bbbbb-ccccc-12345",
+      "anthropic/claude-MyCompanyInternalProject",
+      "openai/gpt-5?token=abc&user=alice",
+      "anthropic/claude-../../etc/passwd",
+      "ollama/llama3-mycorp-finetune-confidential",
+      "anthropic/internal-model-name",
+      "openai/our-private-rag-pipeline",
+      `proxy/${"x".repeat(200)}`,
+    ];
+    for (const id of adversarial) {
+      const info = telemetryModelInfo(id);
+      expect(info.model).toBe("other");
+    }
+  });
+
+  test("recognized public models survive the allow-list", () => {
+    const known: Array<[string, string]> = [
+      ["anthropic/claude-opus-4-7", "claude-opus-4-7"],
+      ["anthropic/claude-opus-4.7", "claude-opus-4.7"],
+      ["openai/gpt-4o", "gpt-4o"],
+      ["openai/o3-mini", "o3-mini"],
+      ["xai/grok-4", "grok-4"],
+      ["deepseek/deepseek-reasoner", "deepseek-reasoner"],
+    ];
+    for (const [id, expected] of known) {
+      expect(telemetryModelInfo(id).model).toBe(expected);
+    }
   });
 });
