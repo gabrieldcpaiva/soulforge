@@ -2,6 +2,11 @@
 
 All notable changes to SoulForge are documented here.
 
+## [2.20.1] — 2026-06-03
+
+### Bug Fixes
+
+- **llm**: pass reasoning effort through llmgateway for non-Claude models
 ## [2.20.0] — 2026-06-02
 
 ### Bug Fixes
