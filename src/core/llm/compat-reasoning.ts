@@ -41,8 +41,15 @@ export function getCompatReasoningBody(
 
   const base = baseModel(modelId);
 
-  let effort: "low" | "medium" | "high" | "xhigh" | "off" | undefined =
+  let effort: "low" | "medium" | "high" | "xhigh" | "max" | "off" | undefined =
     config.performance?.compatReasoningEffort;
+
+  // DeepSeek V4 takes a dedicated knob and accepts only high|max natively.
+  // Only a real level overrides — "off"/unset falls through to the shared knobs.
+  if (provider === "deepseek") {
+    const d = config.performance?.deepseekReasoningEffort;
+    if (d && d !== "off") effort = d;
+  }
 
   if (provider === "groq") {
     const g = config.performance?.groqReasoningEffort;
@@ -52,11 +59,18 @@ export function getCompatReasoningBody(
   if (!effort || effort === "off") {
     const e = config.performance?.effort;
     if (e && e !== "off") {
-      effort = e === "max" ? "xhigh" : e;
+      // DeepSeek understands "max" directly; other compat providers cap at "xhigh".
+      effort = e === "max" && provider !== "deepseek" ? "xhigh" : e;
     }
   }
 
   if (!effort || effort === "off") return {};
+
+  // DeepSeek's API enum is strictly high|max. Fold the generic ladder down.
+  if (provider === "deepseek") {
+    const dsEffort = effort === "max" || effort === "xhigh" ? "max" : "high";
+    return { reasoning_effort: dsEffort };
+  }
 
   const isClaude = base.startsWith("claude");
 
@@ -70,7 +84,9 @@ export function getCompatReasoningBody(
     }
     const explicitBudget = config.thinking?.budgetTokens;
     const budget =
-      explicitBudget ?? { low: 2048, medium: 5000, high: 10000, xhigh: 20000 }[effort] ?? 5000;
+      explicitBudget ??
+      { low: 2048, medium: 5000, high: 10000, xhigh: 20000, max: 32000 }[effort] ??
+      5000;
     return { thinking: { type: "enabled", budget_tokens: budget } };
   }
 

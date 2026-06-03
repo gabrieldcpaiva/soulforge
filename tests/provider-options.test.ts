@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildProviderOptions,
+  clampEffort,
   degradeProviderOptions,
   detectModelFamily,
+  getSupportedClaudeEfforts,
+  getSupportedEfforts,
 } from "../src/core/llm/provider-options.js";
 import type { AppConfig } from "../src/types/index.js";
 import { getCompatReasoningBody } from "../src/core/llm/compat-reasoning.js";
@@ -286,11 +289,113 @@ describe("buildProviderOptions — regression: existing behaviour preserved", ()
   });
 });
 
+describe("getSupportedClaudeEfforts", () => {
+  test("opus 4.7 supports full ladder incl. xhigh + max", () => {
+    expect(getSupportedClaudeEfforts("anthropic/claude-opus-4-7")).toEqual([
+      "max",
+      "xhigh",
+      "high",
+      "medium",
+      "low",
+    ]);
+  });
+
+  test("opus 4.6 + sonnet 4.6 support max but NOT xhigh", () => {
+    expect(getSupportedClaudeEfforts("anthropic/claude-opus-4-6")).toEqual([
+      "max",
+      "high",
+      "medium",
+      "low",
+    ]);
+    expect(getSupportedClaudeEfforts("anthropic/claude-sonnet-4-6")).toEqual([
+      "max",
+      "high",
+      "medium",
+      "low",
+    ]);
+  });
+
+  test("opus 4.5 supports max (not xhigh)", () => {
+    const e = getSupportedClaudeEfforts("anthropic/claude-opus-4-5");
+    expect(e).toContain("max");
+    expect(e).not.toContain("xhigh");
+  });
+
+  test("haiku has no effort support", () => {
+    expect(getSupportedClaudeEfforts("anthropic/claude-haiku-4-5")).toBeNull();
+  });
+
+  test("clampEffort folds unsupported xhigh down to high on opus 4.6", () => {
+    expect(clampEffort("anthropic/claude-opus-4-6", "xhigh")).toBe("high");
+  });
+
+  test("clampEffort keeps max on opus 4.6", () => {
+    expect(clampEffort("anthropic/claude-opus-4-6", "max")).toBe("max");
+  });
+});
+
+describe("getSupportedEfforts (route-agnostic, family-dispatched)", () => {
+  test("claude through any route resolves the same per-model set", () => {
+    const expected = ["off", "max", "high", "medium", "low"];
+    expect(getSupportedEfforts("anthropic/claude-opus-4-6")).toEqual(expected);
+    expect(getSupportedEfforts("proxy/claude-opus-4-6")).toEqual(expected);
+    expect(getSupportedEfforts("llmgateway/claude-opus-4-6")).toEqual(expected);
+    expect(getSupportedEfforts("openrouter/anthropic/claude-opus-4-6")).toEqual(expected);
+  });
+
+  test("opus 4.7 exposes xhigh; 4.6 does not", () => {
+    expect(getSupportedEfforts("proxy/claude-opus-4-7")).toContain("xhigh");
+    expect(getSupportedEfforts("proxy/claude-opus-4-6")).not.toContain("xhigh");
+  });
+
+  test("deepseek caps at high|max", () => {
+    expect(getSupportedEfforts("deepseek/deepseek-v4-pro")).toEqual(["off", "high", "max"]);
+  });
+
+  test("openai reasoning has no xhigh; non-reasoning is null", () => {
+    expect(getSupportedEfforts("openai/gpt-5")).toEqual([
+      "off",
+      "none",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+    ]);
+    expect(getSupportedEfforts("openai/gpt-4o")).toBeNull();
+  });
+
+  test("non-effort families return null (keep static list)", () => {
+    expect(getSupportedEfforts("anthropic/claude-haiku-4-5")).toBeNull();
+  });
+});
+
 describe("getCompatReasoningBody", () => {
   test("deepseek/deepseek-chat returns reasoning_effort body", () => {
     const cfg = baseConfig({ effort: "high" });
     const body = getCompatReasoningBody("deepseek/deepseek-chat", cfg);
     expect(body.reasoning_effort).toBe("high");
+  });
+
+  test("deepseek dedicated effort=max emits real max (not xhigh)", () => {
+    const cfg = baseConfig({ deepseekReasoningEffort: "max" });
+    const body = getCompatReasoningBody("deepseek/deepseek-v4-pro", cfg);
+    expect(body.reasoning_effort).toBe("max");
+    expect(body.reasoning).toBeUndefined();
+  });
+
+  test("deepseek dedicated effort overrides global effort", () => {
+    const cfg = baseConfig({ effort: "low", deepseekReasoningEffort: "high" });
+    expect(getCompatReasoningBody("deepseek/deepseek-v4-pro", cfg).reasoning_effort).toBe("high");
+  });
+
+  test("deepseek folds global effort=max to max (no xhigh detour)", () => {
+    const cfg = baseConfig({ effort: "max" });
+    expect(getCompatReasoningBody("deepseek/deepseek-v4-pro", cfg).reasoning_effort).toBe("max");
+  });
+
+  test("deepseek folds generic low/medium down to high", () => {
+    const cfg = baseConfig({ deepseekReasoningEffort: "off", compatReasoningEffort: "medium" });
+    expect(getCompatReasoningBody("deepseek/deepseek-chat", cfg).reasoning_effort).toBe("high");
   });
 
   test("groq with groqReasoningEffort populates body (gpt-oss → medium)", () => {

@@ -431,7 +431,7 @@ export function getSupportedClaudeEfforts(modelId: string): EffortLevel[] | null
     return ["max", "xhigh", "high", "medium", "low"];
   }
 
-  // Opus 4.6 and Sonnet 4.6: max but NOT xhigh
+  // Opus 4.6 and Sonnet 4.6: max but NOT xhigh (xhigh is Opus 4.7+ only).
   if (
     base.includes("opus-4-6") ||
     base.includes("opus-4.6") ||
@@ -441,9 +441,9 @@ export function getSupportedClaudeEfforts(modelId: string): EffortLevel[] | null
     return ["max", "high", "medium", "low"];
   }
 
-  // Opus 4.5: up to high only
+  // Opus 4.5: supports the effort param incl. max, but NOT xhigh.
   if (base.includes("opus-4-5") || base.includes("opus-4.5")) {
-    return ["high", "medium", "low"];
+    return ["max", "high", "medium", "low"];
   }
 
   // Other Claude 4+ models with effort capability
@@ -463,6 +463,32 @@ export function clampEffort(modelId: string, effort: EffortLevel): EffortLevel |
     if (level && supported.includes(level)) return level;
   }
   return supported[supported.length - 1] ?? null;
+}
+
+/** Effort levels a model accepts, by family. Returns null when the model has
+ *  no effort/reasoning knob (so the UI can keep its full generic list).
+ *  Route-agnostic: keys off the model string, so Claude/DeepSeek/etc. through
+ *  any gateway (proxy, llmgateway, openrouter, …) resolves the same set. */
+export function getSupportedEfforts(modelId: string): string[] | null {
+  const family = detectModelFamily(modelId);
+  const base = extractBaseModel(modelId);
+
+  if (family === "claude") {
+    const efforts = getSupportedClaudeEfforts(modelId);
+    return efforts ? ["off", ...efforts] : null;
+  }
+  if (family === "deepseek") return ["off", "high", "max"];
+  if (family === "openai") {
+    const isReasoning =
+      base.startsWith("o1") ||
+      base.startsWith("o3") ||
+      base.startsWith("o4") ||
+      base.startsWith("gpt-5");
+    return isReasoning ? ["off", "none", "minimal", "low", "medium", "high"] : null;
+  }
+  if (family === "xai") return ["off", "low", "medium", "high"];
+  if (family === "google") return ["off", "minimal", "low", "medium", "high"];
+  return null;
 }
 
 /** Programmatic tool calling (allowedCallers) requires Claude 4+ non-haiku. */

@@ -202,6 +202,7 @@ type ServiceTier = "auto" | "flex" | "priority" | "default";
 export type GoogleThinkingLevel = "off" | "minimal" | "low" | "medium" | "high";
 export type XaiReasoningEffort = "off" | "low" | "medium" | "high";
 export type DeepseekThinking = "off" | "enabled";
+export type DeepseekReasoningEffort = "off" | "high" | "max";
 export type OpenRouterReasoningEffort =
   | "off"
   | "minimal"
@@ -244,6 +245,8 @@ export interface PerformanceConfig {
   xaiReasoningEffort?: XaiReasoningEffort;
   /** DeepSeek thinking — only applies to deepseek-chat (reasoner auto-thinks). */
   deepseekThinking?: DeepseekThinking;
+  /** DeepSeek V4 reasoning effort. API accepts only high|max. "off" = not sent. */
+  deepseekReasoningEffort?: DeepseekReasoningEffort;
   /** OpenRouter unified reasoning effort. */
   openrouterReasoningEffort?: OpenRouterReasoningEffort;
   /** OpenRouter max_tokens for reasoning. Anthropic-style budget. "off" = not sent. */

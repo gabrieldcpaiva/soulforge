@@ -1,5 +1,6 @@
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useEffect, useState } from "react";
+import { getSupportedEfforts } from "../../core/llm/provider-options.js";
 import { useTheme } from "../../core/theme/index.js";
 import type {
   AppConfig,
@@ -149,9 +150,9 @@ const OPENAI_ITEMS: SettingItem[] = [
   {
     key: "openaiReasoningEffort",
     label: "Effort",
-    desc: "o3 · o4 · gpt-5 — reasoning depth",
+    desc: "o3 · o4 · gpt-5.x — reasoning depth. none = fastest (latency-sensitive)",
     type: "cycle",
-    options: ["off", "none", "minimal", "low", "medium", "high", "xhigh"],
+    options: ["off", "none", "minimal", "low", "medium", "high"],
   },
   {
     key: "openaiReasoningSummary",
@@ -249,13 +250,20 @@ const XAI_ITEMS: SettingItem[] = [
 const DEEPSEEK_ITEMS: SettingItem[] = [
   {
     type: "info",
-    text: "Applies to deepseek-chat only. deepseek-reasoner always thinks (no toggle).",
+    text: "V4 Pro / V4 Flash take Effort (high|max). Thinking toggle applies to deepseek-chat / V3 only — deepseek-reasoner always thinks.",
   },
   { type: "section", label: "Reasoning" },
   {
+    key: "deepseekReasoningEffort",
+    label: "Effort",
+    desc: "DeepSeek V4 — API accepts only high | max (xhigh folds to max)",
+    type: "cycle",
+    options: ["off", "high", "max"],
+  },
+  {
     key: "deepseekThinking",
     label: "Thinking",
-    desc: "Enable chain-of-thought generation on deepseek-chat",
+    desc: "Enable chain-of-thought generation on deepseek-chat / V3",
     type: "cycle",
     options: ["off", "enabled"],
   },
@@ -293,7 +301,7 @@ const OPENROUTER_ITEMS: SettingItem[] = [
 const COMPAT_ITEMS: SettingItem[] = [
   {
     type: "info",
-    text: "Applies to: Groq · Fireworks · OpenCode Zen · OpenCode Go · LM Studio · Ollama · Copilot · GitHub Models · MiniMax · Proxy · LLM Gateway (non-Claude lane)",
+    text: "Catch-all for providers without their own tab: Groq · Fireworks · OpenCode Zen · OpenCode Go · LM Studio · Ollama · Copilot · GitHub Models · MiniMax · Proxy · LLM Gateway (non-Claude lane). DeepSeek has its own tab.",
   },
   { type: "section", label: "Shared effort" },
   {
@@ -358,6 +366,7 @@ interface CurrentValues {
   googleIncludeThoughts: boolean;
   xaiReasoningEffort: string;
   deepseekThinking: string;
+  deepseekReasoningEffort: string;
   openrouterReasoningEffort: string;
   openrouterReasoningMaxTokens: string;
   openrouterExcludeReasoning: boolean;
@@ -392,6 +401,7 @@ const DEFAULTS: CurrentValues = {
   googleIncludeThoughts: false,
   xaiReasoningEffort: "off",
   deepseekThinking: "off",
+  deepseekReasoningEffort: "off",
   openrouterReasoningEffort: "off",
   openrouterReasoningMaxTokens: "off",
   openrouterExcludeReasoning: false,
@@ -429,6 +439,8 @@ function readValuesFromLayer(layer: Partial<AppConfig> | null): Partial<CurrentV
     v.xaiReasoningEffort = layer.performance.xaiReasoningEffort;
   if (layer.performance?.deepseekThinking !== undefined)
     v.deepseekThinking = layer.performance.deepseekThinking;
+  if (layer.performance?.deepseekReasoningEffort !== undefined)
+    v.deepseekReasoningEffort = layer.performance.deepseekReasoningEffort;
   if (layer.performance?.openrouterReasoningEffort !== undefined)
     v.openrouterReasoningEffort = layer.performance.openrouterReasoningEffort;
   if (layer.performance?.openrouterReasoningMaxTokens !== undefined)
@@ -500,6 +512,8 @@ function buildPatch(key: string, value: string | number | boolean): Partial<AppC
       return { performance: { xaiReasoningEffort: value as string } as PerformanceConfig };
     case "deepseekThinking":
       return { performance: { deepseekThinking: value as string } as PerformanceConfig };
+    case "deepseekReasoningEffort":
+      return { performance: { deepseekReasoningEffort: value as string } as PerformanceConfig };
     case "openrouterReasoningEffort":
       return { performance: { openrouterReasoningEffort: value as string } as PerformanceConfig };
     case "openrouterReasoningMaxTokens": {
@@ -555,6 +569,29 @@ function detectInitialScope(project: Partial<AppConfig> | null): ConfigScope {
   return "global";
 }
 
+/** Effort-style keys whose option list should be narrowed to the active
+ *  model's real capability. Maps each key to a representative model id so
+ *  getSupportedEfforts() can resolve the family (route-agnostic). */
+const EFFORT_KEY_MODELS: Record<string, (model: string) => string> = {
+  effort: (m) => m,
+  deepseekReasoningEffort: () => "deepseek/deepseek-v4-pro",
+  openaiReasoningEffort: () => "openai/gpt-5",
+  xaiReasoningEffort: () => "xai/grok-4",
+  googleThinkingLevel: () => "google/gemini-3-pro",
+};
+
+/** Narrow a cycle's options to the active model when the key is effort-style
+ *  and the model has a known capability set. Falls back to the static list. */
+function resolveOptions(key: string, staticOpts: string[], activeModel: string): string[] {
+  const resolver = EFFORT_KEY_MODELS[key];
+  if (!resolver) return staticOpts;
+  const supported = getSupportedEfforts(resolver(activeModel));
+  if (!supported) return staticOpts;
+  const allowed = new Set(supported);
+  const filtered = staticOpts.filter((o) => allowed.has(o));
+  return filtered.length > 0 ? filtered : staticOpts;
+}
+
 interface Props {
   visible: boolean;
   globalConfig: AppConfig;
@@ -580,6 +617,7 @@ export function ProviderSettings({
   const [cursor, setCursor] = useState(0);
   const [scope, setScope] = useState<ConfigScope>(() => detectInitialScope(projectConfig));
   const vals = effectiveValues(globalConfig, projectConfig);
+  const activeModel = projectConfig?.defaultModel ?? globalConfig.defaultModel ?? "";
 
   const items = TAB_ITEMS[tab];
   const tabIdx = TABS.indexOf(tab);
@@ -633,10 +671,11 @@ export function ProviderSettings({
       return;
     }
     if (item.type === "cycle" && item.options) {
+      const opts = resolveOptions(item.key, item.options, activeModel);
       const current = String(vals[item.key as keyof CurrentValues]);
-      const currentIdx = item.options.indexOf(current);
-      const nextIdx = (currentIdx + 1) % item.options.length;
-      onUpdate(buildPatch(item.key, item.options[nextIdx] as string), scope);
+      const currentIdx = opts.indexOf(current);
+      const nextIdx = (currentIdx + 1) % opts.length;
+      onUpdate(buildPatch(item.key, opts[nextIdx] as string), scope);
     }
   };
 
@@ -822,7 +861,7 @@ export function ProviderSettings({
                   </box>
                 );
               } else {
-                const opts = item.options ?? [];
+                const opts = resolveOptions(item.key, item.options ?? [], activeModel);
                 const currentValue =
                   item.type === "budget" ? String(vals.budgetTokens) : String(raw);
                 const valColor = disabled
