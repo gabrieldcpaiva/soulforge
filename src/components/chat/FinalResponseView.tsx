@@ -8,6 +8,7 @@ import { formatElapsed } from "../../hooks/useElapsed.js";
 import { useHover } from "../../hooks/useHover.js";
 import { Spinner } from "../layout/shared.js";
 import { ImageDisplay } from "./ImageDisplay.js";
+import { ReasoningBlock } from "./ReasoningBlock.js";
 import { DripText, type StreamSegment } from "./StreamSegmentList.js";
 import {
   DispatchSubtree,
@@ -341,6 +342,8 @@ export const FinalResponseLiveAutoView = memo(function FinalResponseLiveAutoView
   loadingStartedAt,
   messagesLength,
   finalResponseCalled,
+  showReasoning = true,
+  reasoningExpanded = false,
 }: {
   segments: StreamSegment[];
   liveToolCalls: LiveToolCall[];
@@ -348,8 +351,38 @@ export const FinalResponseLiveAutoView = memo(function FinalResponseLiveAutoView
   messagesLength: number;
   /** True when the model called `final_response()` this turn. Trailing text streams as final answer. */
   finalResponseCalled: boolean;
+  showReasoning?: boolean;
+  reasoningExpanded?: boolean;
 }) {
+  const t = useTheme();
   const firstToolsIdx = useMemo(() => segments.findIndex((s) => s.type === "tools"), [segments]);
+
+  // Reasoning blocks stream alongside text/tools. The static (committed) view
+  // renders these when reasoning is enabled, so the live view must match —
+  // otherwise a reasoning-first turn shows a bare header until text arrives.
+  const reasoningSegs = useMemo(
+    () =>
+      showReasoning
+        ? segments.filter(
+            (s): s is Extract<StreamSegment, { type: "reasoning" }> => s.type === "reasoning",
+          )
+        : [],
+    [segments, showReasoning],
+  );
+  const reasoningNode =
+    reasoningSegs.length > 0 ? (
+      <box flexDirection="column">
+        {reasoningSegs.map((seg) => (
+          <ReasoningBlock
+            key={seg.id}
+            content={seg.content}
+            expanded={reasoningExpanded}
+            isStreaming={!seg.done}
+            id={seg.id}
+          />
+        ))}
+      </box>
+    ) : null;
 
   // Chat-only turn (no tool segments) — stream everything as plain text.
   const chatOnlyText = useMemo(() => {
@@ -434,13 +467,27 @@ export const FinalResponseLiveAutoView = memo(function FinalResponseLiveAutoView
   if (chatOnlyText) {
     return (
       <box flexDirection="column">
+        {reasoningNode}
         <DripText content={chatOnlyText} streaming />
       </box>
     );
   }
 
+  // Nothing visible yet (e.g. only reasoning has streamed and it's hidden, or
+  // the model is still thinking before any output) — show a placeholder so the
+  // header never appears with an empty body.
+  const hasVisibleBody = !!reasoningNode || tools.length > 0 || !!opening || !!trailingText;
+  if (!hasVisibleBody) {
+    return (
+      <text fg={t.textMuted} attributes={TextAttributes.ITALIC}>
+        Thinking…
+      </text>
+    );
+  }
+
   return (
     <box flexDirection="column">
+      {reasoningNode}
       {opening ? (
         <box flexDirection="column">
           <DripText content={opening} streaming />

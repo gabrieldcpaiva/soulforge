@@ -810,6 +810,8 @@ export const TabInstance = memo(function TabInstance({
                                   loadingStartedAt={loadingStartedAtRef.current}
                                   messagesLength={chat.messages.length}
                                   finalResponseCalled={chat.finalResponseCalled}
+                                  showReasoning={showReasoning}
+                                  reasoningExpanded={reasoningExpanded}
                                 />
                               )}
                             </box>
