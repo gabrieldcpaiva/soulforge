@@ -1,3 +1,4 @@
+import type { ScrollBoxRenderable } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useEffect, useRef, useState } from "react";
 import { type ThemeTokens, useTheme } from "../../core/theme/index.js";
@@ -14,6 +15,7 @@ import {
   Toggle,
   VSpacer,
 } from "../ui/index.js";
+import { listScrollAccel } from "../ui/scroll.js";
 
 const LABEL_W = 18;
 const POPUP_W = 72;
@@ -123,6 +125,7 @@ export function RepoMapStatusPopup({
   const stateRef = useRef(useRepoMapStore.getState());
   const [, setRenderTick] = useState(0);
   const spinnerRef = useRef(0);
+  const bodyScrollRef = useRef<ScrollBoxRenderable>(null);
 
   const initialMode = (currentMode ?? "off") as SemanticMode;
   const initialLimit = currentLimit ?? 300;
@@ -169,6 +172,17 @@ export function RepoMapStatusPopup({
     }, 150);
     return () => clearInterval(timer);
   }, [visible]);
+
+  // Keep the focused control visible — the body scrolls when the popup is
+  // taller than the terminal, otherwise the Mode/Budget selectors clip off
+  // the bottom while focus (and the cursor) silently move onto them.
+  useEffect(() => {
+    if (!visible) return;
+    const sb = bodyScrollRef.current;
+    if (!sb) return;
+    const id = focusRow === FocusRow.Budget ? "repomap-budget" : "repomap-semantic";
+    queueMicrotask(() => sb.scrollChildIntoView(id));
+  }, [visible, focusRow]);
 
   const hasConfig = onApply !== undefined;
   const isModified =
@@ -414,6 +428,8 @@ export function RepoMapStatusPopup({
   const showLimitRow = selectedMode === "llm" || selectedMode === "full";
 
   const popupH = Math.min(Math.max(18, Math.floor(termRows * 0.85)), termRows - 2);
+  // Body height inside the popup chrome: minus header (3), footer (2), border (2).
+  const bodyH = Math.max(4, popupH - 7);
   const headerBlurb = hasConfig
     ? `Soul Map · ${selectedScope}${isModified ? " (modified)" : ""}`
     : `Soul Map · ${status}`;
@@ -444,7 +460,12 @@ export function RepoMapStatusPopup({
       blurb={headerBlurb}
       footerHints={footerHints}
     >
-      <box flexDirection="column" paddingX={1}>
+      <scrollbox
+        ref={bodyScrollRef}
+        height={bodyH}
+        scrollAcceleration={listScrollAccel}
+        paddingX={1}
+      >
         <VSpacer />
 
         <Section>
@@ -494,75 +515,81 @@ export function RepoMapStatusPopup({
           <>
             <VSpacer />
             <Divider width={innerW - 2} />
-            <Section title="Semantic Summaries">
-              <SegmentedControl
-                label="Mode"
-                options={SEMANTIC_MODES.map((m) => ({ value: m, label: MODE_LABELS[m] }))}
-                value={selectedMode}
-                focused={focusRow === FocusRow.Mode}
-              />
+            <box id="repomap-semantic" flexDirection="column" backgroundColor={t.bgPopup}>
+              <Section title="Semantic Summaries">
+                <SegmentedControl
+                  label="Mode"
+                  options={SEMANTIC_MODES.map((m) => ({ value: m, label: MODE_LABELS[m] }))}
+                  value={selectedMode}
+                  focused={focusRow === FocusRow.Mode}
+                />
 
-              {showLimitRow ? (
-                <>
-                  <SegmentedControl
-                    label="LLM Limit"
-                    options={LLM_LIMIT_PRESETS.map((v) => ({ value: v, label: String(v) }))}
-                    value={selectedLimit}
-                    focused={focusRow === FocusRow.Limit}
-                    suffix="symbols"
-                  />
-                  <Toggle
-                    label="Auto-regen  [A]"
-                    description="costs tokens on each file change"
-                    on={selectedAutoRegen}
-                  />
-                </>
-              ) : null}
-
-              <Hint>
-                {selectedMode} — {MODE_DESCRIPTIONS[selectedMode]}
-              </Hint>
-
-              <VSpacer />
-              <box flexDirection="row" paddingX={1} backgroundColor={t.bgPopup}>
-                {onRegenerate ? <KeyCap keyName="G" label="regenerate" accent={t.info} /> : null}
-                {onRegenerate && onClearSummaries ? <text bg={t.bgPopup}>{"   "}</text> : null}
-                {onClearSummaries ? (
-                  confirmClear ? (
-                    <KeyCap
-                      keyName="C"
-                      label="CONFIRM clear (preserves LLM)"
-                      accent={t.brandSecondary}
+                {showLimitRow ? (
+                  <>
+                    <SegmentedControl
+                      label="LLM Limit"
+                      options={LLM_LIMIT_PRESETS.map((v) => ({ value: v, label: String(v) }))}
+                      value={selectedLimit}
+                      focused={focusRow === FocusRow.Limit}
+                      suffix="symbols"
                     />
-                  ) : (
-                    <KeyCap keyName="C" label="clear summaries" accent={t.warning} />
-                  )
+                    <Toggle
+                      label="Auto-regen  [A]"
+                      description="costs tokens on each file change"
+                      on={selectedAutoRegen}
+                    />
+                  </>
                 ) : null}
-                {onLspEnrich ? <text bg={t.bgPopup}>{"   "}</text> : null}
-                {onLspEnrich ? <KeyCap keyName="L" label="lsp enrich" accent={t.success} /> : null}
-              </box>
-            </Section>
 
-            <Divider width={innerW - 2} />
-            <Section title="Map Token Budget">
-              <SegmentedControl
-                label="Budget"
-                options={budgetChips.map((c) => ({
-                  value: c.value ?? "auto",
-                  label: c.label,
-                }))}
-                value={selectedTokenBudget ?? "auto"}
-                focused={focusRow === FocusRow.Budget}
-              />
-              <Hint>
-                {selectedTokenBudget === undefined
-                  ? "scales with conversation length (1.5k\u20134k)"
-                  : `fixed ${String(selectedTokenBudget / 1000)}k tokens — more files visible, higher prompt cost`}
-              </Hint>
-            </Section>
+                <Hint>
+                  {selectedMode} — {MODE_DESCRIPTIONS[selectedMode]}
+                </Hint>
+
+                <VSpacer />
+                <box flexDirection="row" paddingX={1} backgroundColor={t.bgPopup}>
+                  {onRegenerate ? <KeyCap keyName="G" label="regenerate" accent={t.info} /> : null}
+                  {onRegenerate && onClearSummaries ? <text bg={t.bgPopup}>{"   "}</text> : null}
+                  {onClearSummaries ? (
+                    confirmClear ? (
+                      <KeyCap
+                        keyName="C"
+                        label="CONFIRM clear (preserves LLM)"
+                        accent={t.brandSecondary}
+                      />
+                    ) : (
+                      <KeyCap keyName="C" label="clear summaries" accent={t.warning} />
+                    )
+                  ) : null}
+                  {onLspEnrich ? <text bg={t.bgPopup}>{"   "}</text> : null}
+                  {onLspEnrich ? (
+                    <KeyCap keyName="L" label="lsp enrich" accent={t.success} />
+                  ) : null}
+                </box>
+              </Section>
+            </box>
+
+            <box id="repomap-budget" flexDirection="column" backgroundColor={t.bgPopup}>
+              <Divider width={innerW - 2} />
+              <Section title="Map Token Budget">
+                <SegmentedControl
+                  label="Budget"
+                  options={budgetChips.map((c) => ({
+                    value: c.value ?? "auto",
+                    label: c.label,
+                  }))}
+                  value={selectedTokenBudget ?? "auto"}
+                  focused={focusRow === FocusRow.Budget}
+                />
+                <Hint>
+                  {selectedTokenBudget === undefined
+                    ? "scales with conversation length (1.5k\u20134k)"
+                    : `fixed ${String(selectedTokenBudget / 1000)}k tokens — more files visible, higher prompt cost`}
+                </Hint>
+              </Section>
+            </box>
           </>
         )}
-      </box>
+      </scrollbox>
     </PremiumPopup>
   );
 }

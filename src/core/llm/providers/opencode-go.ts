@@ -51,40 +51,27 @@ export const opencodeGo: ProviderDefinition = {
     }
   },
 
-  // model list from https://opencode.ai/docs/go
+  // Offline fallback only — the live list comes from fetchModels()
+  // (https://opencode.ai/zen/go/v1/models). Keep this short.
   fallbackModels: [
     { id: "glm-5.1", name: "GLM 5.1" },
-    { id: "glm-5", name: "GLM 5" },
     { id: "kimi-k2.6", name: "Kimi K2.6" },
-    { id: "kimi-k2.5", name: "Kimi K2.5" },
+    { id: "minimax-m3", name: "MiniMax M3" },
     { id: "mimo-v2.5-pro", name: "MiMo V2.5 Pro" },
-    { id: "mimo-v2.5", name: "MiMo V2.5" },
-    { id: "minimax-m2.7", name: "MiniMax M2.7" },
-    { id: "minimax-m2.5", name: "MiniMax M2.5" },
-    { id: "qwen3.6-plus", name: "Qwen3.6 Plus" },
-    { id: "qwen3.5-plus", name: "Qwen3.5 Plus" },
+    { id: "qwen3.7-max", name: "Qwen3.7 Max" },
     { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro" },
     { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash" },
   ],
 
+  // Prefix patterns — match every minor variant the live API returns.
   contextWindows: [
-    // GLM models: ~200k context window (docs.z.ai)
-    ["glm-5.1", 204_800],
     ["glm-5", 204_800],
-    // Kimi K2.5/K2.6
-    ["kimi-k2.6", 262_000],
-    ["kimi-k2.5", 262_000],
-    // MiMo V2.5 — docs say ≤ 256K
-    ["mimo-v2.5-pro", 262_144],
-    ["mimo-v2.5", 262_144],
-    // MiniMax
-    ["minimax-m2.7", 196_000],
-    ["minimax-m2.5", 196_000],
-    // Qwen
-    ["qwen3.6-plus", 1_000_000],
-    ["qwen3.5-plus", 1_000_000],
-    // DeepSeek V4
-    ["deepseek-v4-pro", 131_072],
-    ["deepseek-v4-flash", 131_072],
+    ["kimi-k2", 262_000],
+    ["mimo-v2", 262_144],
+    ["minimax-m3", 196_000],
+    ["minimax-m2", 196_000],
+    ["qwen3", 1_000_000],
+    ["deepseek-v4", 131_072],
+    ["hy3", 262_144],
   ],
 };
