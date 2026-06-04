@@ -2,6 +2,14 @@
 
 All notable changes to SoulForge are documented here.
 
+## [2.20.5] — 2026-06-04
+
+### Bug Fixes
+
+- **chat**: snappier streaming + no bare assistant header
+### Features
+
+- **llm**: extract inline reasoning tags into reasoning parts
 ## [2.20.4] — 2026-06-04
 
 ### Bug Fixes
