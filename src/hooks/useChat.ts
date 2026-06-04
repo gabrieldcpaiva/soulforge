@@ -2708,8 +2708,19 @@ export function useChat({
               abortController.abort();
             }, 10_000);
 
-          let streamEventCount = 0;
           let yieldBeforeNext = false;
+          let lastYieldTs = Date.now();
+          // Yield budget: hand the event loop a turn at most every ~8ms so the
+          // renderer can paint streamed text. A microtask yield (Promise.resolve)
+          // can't be starved by a busy event loop the way setTimeout(0) can.
+          const YIELD_BUDGET_MS = 8;
+          // Resolve Hearth bridge once. When no surface is paired we skip the
+          // per-delta bridge streaming entirely, avoiding a microtask per delta
+          // on the streaming hot path for the common local-TUI case.
+          const hearthBridgeMod = await import("../hearth/bridge.js");
+          const hearthLive = hearthBridgeMod.hearthBridge
+            .listBindings()
+            .some((b) => b.tabId === tabId);
           // Capture the iterator so the watchdog can call .return() on the SAME
           // instance the loop holds. Calling [Symbol.asyncIterator]() again would
           // try getReader() on an already-locked ReadableStream and throw.
@@ -2720,9 +2731,10 @@ export function useChat({
           )[Symbol.asyncIterator]();
           for await (const part of { [Symbol.asyncIterator]: () => streamIterator }) {
             markActivity();
-            if (yieldBeforeNext || ++streamEventCount % 5 === 0) {
+            if (yieldBeforeNext || Date.now() - lastYieldTs >= YIELD_BUDGET_MS) {
               yieldBeforeNext = false;
-              await new Promise<void>((r) => setTimeout(r, 0));
+              lastYieldTs = Date.now();
+              await Promise.resolve();
             }
             switch (part.type) {
               case "start-step": {
@@ -2749,9 +2761,7 @@ export function useChat({
               case "reasoning-delta": {
                 gotFirstContent = true;
                 appendReasoningContent(part.text);
-                void import("../hearth/bridge.js").then(({ reasoningStreamEmitter }) => {
-                  reasoningStreamEmitter.append(tabId, part.text);
-                });
+                if (hearthLive) hearthBridgeMod.reasoningStreamEmitter.append(tabId, part.text);
                 break;
               }
               case "reasoning-end":
@@ -2761,9 +2771,11 @@ export function useChat({
                 gotFirstContent = true;
                 appendText(part.text);
                 // Stream visible text to Hearth surfaces in real time (coalesced).
-                void import("../hearth/bridge.js").then(({ bridgeStreamEmitter }) => {
-                  bridgeStreamEmitter.stream(tabId, { type: "text", content: part.text });
-                });
+                if (hearthLive)
+                  hearthBridgeMod.bridgeStreamEmitter.stream(tabId, {
+                    type: "text",
+                    content: part.text,
+                  });
                 queueMicrotaskFlush();
                 break;
               }

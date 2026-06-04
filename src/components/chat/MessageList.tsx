@@ -1214,6 +1214,17 @@ const AssistantMessage = memo(function AssistantMessage({
   const hasTools = msg.toolCalls && msg.toolCalls.length > 0;
   const isEmpty = !hasSegments && !hasContent && !hasTools;
 
+  // A message whose only content is reasoning renders an empty body when
+  // reasoning is hidden — leaving a bare header. Detect that case so we can
+  // show a "Thinking…" placeholder instead of nothing.
+  const onlyHiddenReasoning =
+    !isEmpty &&
+    !hasContent &&
+    !hasTools &&
+    !showReasoning &&
+    !!msg.segments?.length &&
+    msg.segments.every((s) => s.type === "reasoning");
+
   // Stable seed from message id for deterministic silly-message selection
   const finalResponseSeed = useMemo(() => {
     let h = 0;
@@ -1344,6 +1355,10 @@ const AssistantMessage = memo(function AssistantMessage({
       {isEmpty ? (
         <text fg={t.textMuted} attributes={TextAttributes.ITALIC}>
           Empty response — model returned no content.
+        </text>
+      ) : onlyHiddenReasoning ? (
+        <text fg={t.textMuted} attributes={TextAttributes.ITALIC}>
+          Thinking… (reasoning hidden)
         </text>
       ) : autoLayout ? (
         <>

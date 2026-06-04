@@ -1,4 +1,6 @@
+import { TextAttributes } from "@opentui/core";
 import { memo, useMemo, useRef } from "react";
+import { useTheme } from "../../core/theme/store.js";
 import { Markdown } from "./Markdown.js";
 import { ReasoningBlock } from "./ReasoningBlock.js";
 import { type LiveToolCall, ToolCallDisplay } from "./ToolCallDisplay.js";
@@ -49,6 +51,7 @@ export const StreamSegmentList = memo(function StreamSegmentList({
 }) {
   // Build a stable id->call lookup. Allocating a new Map each render costs O(N)
   // but avoids the O(N²) of repeated linear lookups inside the render loop.
+  const t = useTheme();
   const toolCallMap = useMemo(() => {
     const m = new Map<string, LiveToolCall>();
     for (const tc of toolCalls) m.set(tc.id, tc);
@@ -120,9 +123,24 @@ export const StreamSegmentList = memo(function StreamSegmentList({
     return -1;
   }, [merged, streaming]);
 
+  // When reasoning is hidden, a turn that has only emitted reasoning so far has
+  // no visible body — leaving a bare header while the model thinks. Show a
+  // placeholder until the first visible (text/tools) content streams in.
+  const hasVisibleContent = merged.some(
+    (seg) =>
+      (seg.type === "reasoning" && showReasoning) ||
+      (seg.type === "text" && seg.content.trim().length > 0) ||
+      seg.type === "tools",
+  );
+
   let lastVisibleType: string | null = null;
   return (
     <>
+      {streaming && !hasVisibleContent ? (
+        <text fg={t.textMuted} attributes={TextAttributes.ITALIC}>
+          Thinking…
+        </text>
+      ) : null}
       {merged.map((seg, i) => {
         if (seg.type === "reasoning" && !showReasoning) return null;
 
