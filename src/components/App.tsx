@@ -265,8 +265,10 @@ import {
   type ProviderStatus,
   subscribeProviderStatuses,
 } from "../core/llm/provider.js";
+import { IS_WIN } from "../core/platform/index.js";
 import type { PrerequisiteStatus } from "../core/setup/prerequisites.js";
 import { getEditedFilesForTab } from "../core/tools/edit-stack.js";
+import { useCopySelection } from "../hooks/useCopySelection.js";
 import { useMCPStore } from "../stores/mcp.js";
 import { getAppSessionId, setAppSessionId } from "../stores/session.js";
 import { MemoryBrowser } from "./modals/MemoryBrowser.js";
@@ -376,6 +378,7 @@ export function App({
   useEffect(() => subscribeProviderStatuses(setProviderStatuses), []);
 
   useEffect(() => {
+    if (IS_WIN) return;
     const onSelection = (sel: Selection) => {
       const text = sel.getSelectedText();
       if (text) copyToClipboard(text);
@@ -385,6 +388,12 @@ export function App({
       renderer.off("selection", onSelection);
     };
   }, [renderer, copyToClipboard]);
+
+  const {
+    copySelection,
+    onMouseDown: onRootMouseDown,
+    onMouseUp: onRootMouseUp,
+  } = useCopySelection();
 
   useEffect(() => {
     fetchOpenRouterMetadata();
@@ -1475,7 +1484,7 @@ export function App({
     toggleEditor,
     focusMode,
     renderer,
-    copyToClipboard,
+    copySelection,
     activeChatRef,
     cycleMode: useCallback(() => {
       const chat = tabMgrRef.current?.getActiveChat();
@@ -1504,7 +1513,14 @@ export function App({
   const anyModalOpen = shutdownPhase >= 0 || isModalOpen;
 
   return (
-    <box flexDirection="column" height={termHeight} backgroundColor={t.bgApp}>
+    // biome-ignore lint/a11y/noStaticElementInteractions: opentui box is the interactive primitive in TUI; a11y rule targets DOM
+    <box
+      flexDirection="column"
+      height={termHeight}
+      backgroundColor={t.bgApp}
+      onMouseDown={onRootMouseDown}
+      onMouseUp={onRootMouseUp}
+    >
       <box
         flexShrink={0}
         width="100%"

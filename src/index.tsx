@@ -10,6 +10,11 @@ import { killAllLspSync } from "./core/intelligence/backends/lsp/pid-tracker.js"
 import { disposeIntelligenceRouter } from "./core/intelligence/index.js";
 import { deactivateCurrentProvider, type ProviderStatus } from "./core/llm/provider.js";
 import { disposeMCPManager } from "./core/mcp/index.js";
+import {
+  disableProcessedInput,
+  flushInputBuffer,
+  installCtrlCGuard,
+} from "./core/platform/console-win32.js";
 import { killAllTracked, killProcessGroup } from "./core/process-tracker.js";
 import { getRestartSpec } from "./core/restart.js";
 import { flushEmergencySession } from "./core/sessions/emergency-save.js";
@@ -20,6 +25,7 @@ import { garble } from "./core/utils/splash.js";
 import { resetStatusBarStore } from "./stores/statusbar.js";
 import { resetUIStore } from "./stores/ui.js";
 import type { AppConfig } from "./types/index.js";
+import { copyToClipboard as nativeCopyToClipboard } from "./utils/clipboard.js";
 
 let exitSessionId: string | null = null;
 let renderer: Awaited<ReturnType<typeof CreateCliRenderer>> | null = null;
@@ -104,6 +110,7 @@ function printExitBanner(): void {
 export function cleanupAndExit(code = 0): void {
   runCleanup();
   renderer?.destroy();
+  flushInputBuffer();
   printExitBanner();
   process.exit(code);
 }
@@ -370,8 +377,20 @@ export async function start(opts: StartOptions): Promise<void> {
     // (user messages, tool rows, reasoning fold). Hold Shift in most
     // terminals to bypass the renderer and select text natively.
     enableMouseMovement: true,
+    useMouse: true,
+    consoleOptions: {
+      keyBindings: [{ name: "y", ctrl: true, action: "copy-selection" }],
+    },
   });
   renderer = r;
+  disableProcessedInput();
+  installCtrlCGuard();
+  r.console.onCopySelection = (text: string) => {
+    if (!text || text.length === 0) return;
+    r.copyToClipboardOSC52(text);
+    nativeCopyToClipboard(text);
+    r.clearSelection();
+  };
   // Set initial terminal title; per-tab/session updates wire in App.tsx.
   try {
     r.setTerminalTitle("SoulForge");

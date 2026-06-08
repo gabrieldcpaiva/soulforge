@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../core/theme/index.js";
+import { useCopySelection } from "../../hooks/useCopySelection.js";
 
 export type ConfigScope = "project" | "global";
 export const CONFIG_SCOPES: ConfigScope[] = ["project", "global"];
@@ -143,8 +144,16 @@ const OVERLAY_STYLE = { opacity: 0.65 } as const;
 
 export function Overlay({ children }: { children: React.ReactNode }) {
   const t = useTheme();
+  const { onMouseDown, onMouseUp } = useCopySelection();
   return (
-    <box position="absolute" width="100%" height="100%">
+    // biome-ignore lint/a11y/noStaticElementInteractions: opentui box is the interactive primitive in TUI; a11y rule targets DOM
+    <box
+      position="absolute"
+      width="100%"
+      height="100%"
+      onMouseDown={onMouseDown}
+      onMouseUp={onMouseUp}
+    >
       <box
         position="absolute"
         width="100%"

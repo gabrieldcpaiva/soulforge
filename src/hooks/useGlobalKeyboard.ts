@@ -12,8 +12,8 @@ interface GlobalKeyboardParams {
   newSession: () => void;
   toggleEditor: () => void;
   focusMode: "chat" | "editor";
-  renderer: { getSelection: () => Selection | null };
-  copyToClipboard: (text: string) => void;
+  renderer: { getSelection: () => Selection | null; clearSelection: () => void };
+  copySelection: () => boolean;
   activeChatRef: MutableRefObject<ChatInstance | null>;
   cycleMode: () => void;
   tabMgr: UseTabsReturn;
@@ -26,7 +26,7 @@ export function useGlobalKeyboard({
   toggleEditor,
   focusMode,
   renderer,
-  copyToClipboard,
+  copySelection,
   activeChatRef,
   cycleMode,
   tabMgr,
@@ -47,8 +47,13 @@ export function useGlobalKeyboard({
         uiModals.mcpSettings ||
         uiModals.modelEvents ||
         uiModals.tabNamePopup;
-      if (evt.ctrl && evt.name === "c" && !hasOwnInput) {
-        handleExit();
+      if (evt.ctrl && evt.name === "c") {
+        if (copySelection()) {
+          evt.stopPropagation();
+          evt.preventDefault();
+          return;
+        }
+        if (!hasOwnInput) handleExit();
       }
       if (!hasOwnInput) evt.stopPropagation();
       return;
@@ -75,12 +80,16 @@ export function useGlobalKeyboard({
     if (evt.ctrl && evt.name === "o")
       return consume(() => useUIStore.getState().toggleAllExpanded(tabMgr.activeTabId));
 
+    if (evt.name === "escape" && renderer.getSelection()) {
+      return consume(() => renderer.clearSelection());
+    }
+
     // Copy must be checked BEFORE snap-scroll (scroll can invalidate selection)
     if ((evt.ctrl || evt.super) && evt.name === "c") {
-      const sel = renderer.getSelection();
-      if (sel) {
-        const text = sel.getSelectedText();
-        if (text) return consume(() => copyToClipboard(text));
+      if (copySelection()) {
+        evt.stopPropagation();
+        evt.preventDefault();
+        return;
       }
       // Ctrl+Shift+C is copy-only (Konsole/Wayland forwards it as bare Ctrl+C
       // with shift:true). Never exit on shift.
